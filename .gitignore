@@ -1,0 +1,27 @@
+# Backend (Python)
+backend/venv/
+__pycache__/
+*.pyc
+
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# macOS system files
+.DS_Store
+
+# Large FASTA & annotation files
+backend/fasta/
+*.fa
+*.fai
+*.gtf
+
+# Data files
+backend/data/
+jaspar_insect_pfms.txt
+tables2.xlsx
+TF_master_list.txt
+
+backend/app/static
+*.svg

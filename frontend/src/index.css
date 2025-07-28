@@ -1,0 +1,29 @@
+/* for Kanit: */
+@import url('https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,100..900;1,100..900&display=swap');
+
+
+body {
+  font-family: 'Libre Franklin', sans-serif;
+}
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* Prevent double scrollbars on body */
+}
+
+.app-wrapper {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.main-content {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  max-width: 100%;
+}

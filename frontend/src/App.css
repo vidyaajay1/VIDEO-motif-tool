@@ -1,0 +1,20 @@
+body, html, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* Prevent global scroll */
+}
+
+.app-wrapper {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.main-content {
+  flex-grow: 1;
+  overflow-y: auto; /* Single scroll inside main content */
+}
