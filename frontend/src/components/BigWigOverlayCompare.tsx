@@ -1,32 +1,37 @@
-import React, { useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import Plot from "react-plotly.js";
 
-export interface BigWigOverlayProps {
-  dataId: string | null;
+type PlotlyJSON = { data: any[]; layout: any; frames?: any[] };
+
+export interface BigWigOverlayCompareProps {
+  sessionId: string | null;
   inputWindow: number;
-  peakList: string[];
+  // map: label → peak list for that label
+  peakListsByLabel: Record<string, string[]>;
+  labels: string[]; // e.g., ["List A", "List B"]
   apiBase: string;
 }
 
-type PlotlyJSON = {
-  data: any[];
-  layout: any;
-  frames?: any[];
-};
-
-const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
-  dataId,
+const BigWigOverlayCompare: React.FC<BigWigOverlayCompareProps> = ({
+  sessionId,
   inputWindow,
-  peakList,
+  peakListsByLabel,
+  labels,
   apiBase,
 }) => {
+  const [label, setLabel] = useState<string>(labels[0] || "");
   const [gene, setGene] = useState("");
   const [bigwigs, setBigwigs] = useState<File[]>([]);
   const [trackInfo, setTrackInfo] = useState<string[]>([]);
   const [fig, setFig] = useState<PlotlyJSON | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const disabled = !dataId;
+  const disabled = !sessionId;
+
+  const peaks = useMemo(
+    () => (label ? peakListsByLabel[label] || [] : []),
+    [label, peakListsByLabel]
+  );
 
   const handleOverlaySubmit = useCallback(async () => {
     if (disabled) return;
@@ -36,29 +41,30 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
       return n && c;
     });
 
-    if (!gene || bigwigs.length === 0 || !infoOK) {
-      alert("Fill gene, add files, and set track names & colors.");
+    if (!label || !gene || bigwigs.length === 0 || !infoOK) {
+      alert(
+        "Pick a list, choose a peak, add files, and set track names & colors."
+      );
       return;
     }
 
     const fd = new FormData();
-    fd.append("data_id", String(dataId));
+    fd.append("session_id", String(sessionId));
+    fd.append("label", label);
     fd.append("gene", gene);
     fd.append("window", String(inputWindow));
-    bigwigs.forEach((f) => fd.append("bigwigs", f)); // multiple inputs with same name
-    trackInfo.forEach((s) => fd.append("chip_tracks", s)); // "Name|#RRGGBB"
+    bigwigs.forEach((f) => fd.append("bigwigs", f));
+    trackInfo.forEach((s) => fd.append("chip_tracks", s));
 
     setLoading(true);
     setFig(null);
 
     try {
-      const res = await fetch(`${apiBase}/plot-chip-overlay`, {
+      const res = await fetch(`${apiBase}/plot-chip-overlay-compare`, {
         method: "POST",
         body: fd,
       });
-
       if (!res.ok) {
-        // Try to show FastAPI's {"detail": "..."} if present
         let msg = await res.text();
         try {
           const j = JSON.parse(msg);
@@ -68,46 +74,71 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
       }
 
       const payload = await res.json();
-      // Backend: {"chip_overlay_plot": "<plotly-json-string>", ...}
       const figJSON = JSON.parse(payload.chip_overlay_plot) as PlotlyJSON;
-
-      // Make layout responsive-friendly
-      figJSON.layout = {
-        ...figJSON.layout,
-        autosize: true,
-      };
-
+      figJSON.layout = { ...figJSON.layout, autosize: true };
       setFig(figJSON);
     } catch (e: any) {
       alert(e.message ?? String(e));
     } finally {
       setLoading(false);
     }
-  }, [dataId, gene, bigwigs, trackInfo, inputWindow, apiBase, disabled]);
+  }, [
+    sessionId,
+    label,
+    gene,
+    bigwigs,
+    trackInfo,
+    inputWindow,
+    apiBase,
+    disabled,
+  ]);
 
   return (
     <div className={`card mt-4 ${disabled ? "bg-light text-muted" : ""}`}>
       <div className="card-body">
-        <h5 className="card-title">Overlay ChIP/ATAC BigWig Tracks</h5>
+        <h5 className="card-title">
+          Overlay ChIP/ATAC BigWig Tracks (Compare)
+        </h5>
 
-        <div className="mb-3">
-          <label className="form-label">Choose Peak/Gene:</label>
-          <select
-            className="form-select"
-            value={gene}
-            onChange={(e) => setGene(e.target.value)}
-            disabled={disabled}
-          >
-            <option value="">-- pick one --</option>
-            {peakList.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
+        <div className="row g-3">
+          <div className="col-md-4">
+            <label className="form-label">List</label>
+            <select
+              className="form-select"
+              value={label}
+              onChange={(e) => {
+                setLabel(e.target.value);
+                setGene("");
+              }}
+              disabled={disabled}
+            >
+              {labels.map((lb) => (
+                <option key={lb} value={lb}>
+                  {lb}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="col-md-8">
+            <label className="form-label">Peak/Gene</label>
+            <select
+              className="form-select"
+              value={gene}
+              onChange={(e) => setGene(e.target.value)}
+              disabled={disabled || !label}
+            >
+              <option value="">-- pick one --</option>
+              {peaks.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div className="mb-3">
+        <div className="mt-3">
           <input
             type="file"
             className="form-control"
@@ -126,7 +157,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
         </div>
 
         {bigwigs.map((file, idx) => (
-          <div key={idx} className="d-flex align-items-center mb-2">
+          <div key={idx} className="d-flex align-items-center mt-2">
             <small
               className="flex-grow-1 text-truncate"
               style={{ maxWidth: 160 }}
@@ -157,7 +188,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
               value={trackInfo[idx]?.split("|")[1] || "#000000"}
               onChange={(e) => {
                 const [n = ""] = (trackInfo[idx] || "|").split("|");
-                const color = e.target.value; // e.g., "#aabbcc"
+                const color = e.target.value;
                 setTrackInfo((t) => {
                   const copy = [...t];
                   copy[idx] = `${n}|${color}`;
@@ -182,7 +213,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
         ))}
 
         <button
-          className="btn btn-primary"
+          className="btn btn-primary mt-3"
           onClick={handleOverlaySubmit}
           disabled={disabled || loading}
         >
@@ -192,7 +223,6 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
         {fig && (
           <div className="card mt-4">
             <div className="card-body">
-              {/* Give Plotly a real height in px */}
               <div
                 style={{
                   position: "relative",
@@ -202,11 +232,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
               >
                 <Plot
                   data={fig.data}
-                  layout={{
-                    ...fig.layout,
-                    // keep the server-provided height; fall back to the wrapper height
-                    autosize: true,
-                  }}
+                  layout={{ ...fig.layout, autosize: true }}
                   frames={fig.frames}
                   useResizeHandler
                   style={{
@@ -218,7 +244,9 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
                   config={{
                     responsive: true,
                     displaylogo: false,
-                    toImageButtonOptions: { filename: `chip_overlay_${gene}` },
+                    toImageButtonOptions: {
+                      filename: `chip_overlay_${label}_${gene}`,
+                    },
                     modeBarButtonsToRemove: ["lasso2d", "select2d"],
                   }}
                 />
@@ -231,4 +259,4 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
   );
 };
 
-export default BigWigOverlay;
+export default BigWigOverlayCompare;

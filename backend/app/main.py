@@ -14,11 +14,32 @@ from app.new_process_input import process_genomic_input, get_motif_list
 from app.new_scan_motifs import scan_wrapper
 from app.filter_motifs import filter_motif_hits
 from app.integrated_scoring import score_and_merge, score_hit_naive_bayes
-from app.plotting import plot_occurence_overview, rank_peaks_for_plot
+from app.plotting import rank_peaks_for_plot, plot_occurrence_overview_plotly
 from app.bigwig_overlay import fetch_bw_coverage, plot_chip_overlay
 from app.run_streme import write_fasta_from_genes, run_streme_on_fasta, parse_streme_results
 from app.process_tomtom import subset_by_genes
 from app.filter_tfs import filter_tfs_from_gene_list
+from app.utils import _parse_per_motif_pvals
+from app.mem_logger import start_mem_logger
+
+class DatasetInfo(BaseModel):
+    data_id: str
+    label: str
+    peak_list: List[str]
+
+class CompareInitResponse(BaseModel):
+    session_id: str
+    datasets: List[DatasetInfo]
+
+class BatchScanResponse(BaseModel):
+    session_id: str
+    datasets: List[str]  # data_ids scanned
+
+class ComparePlotResponse(BaseModel):
+    session_id: str
+    figures: Dict[str, str]           # {label: plotly_json}
+    ordered_peaks: Dict[str, List[str]]  # {label: [peak_ids]}
+
 
 TMP_DIR = "tmp"
 TF_DATA_CACHE = {}  # type: Dict[str, pd.DataFrame]
@@ -38,6 +59,7 @@ def clear_tmp_dir():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # your existing init work
     clear_tmp_dir()
     global TF_DATA_CACHE
     data_file = os.path.join("data", "tables2.xlsx")
@@ -53,7 +75,11 @@ async def lifespan(app: FastAPI):
     else:
         print("Warning: Data file not found, cache is empty.")
 
-    yield
+    # start the memory logger here
+    start_mem_logger(5)
+
+    yield  # ---- app runs ----
+
 
 app = FastAPI(lifespan=lifespan)
 os.makedirs(TMP_DIR, exist_ok=True)
@@ -71,12 +97,22 @@ class OverviewResponse(BaseModel):
     peaks_df: List[Dict[str, Any]]
     data_id: str
     peak_list: List[str]
+
+# --- Update your response model to carry Plotly JSON ---
 class PlotOverviewResponse(BaseModel):
-    overview_image: AnyUrl
     data_id: str
-    peak_list: List[str] 
+    peak_list: List[str]          # ordered to match the plot
+    overview_plot: str            # Plotly figure as JSON string
+
 class ScannerResponse(BaseModel):
     data_id: str
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 @app.post("/get-genomic-input", response_model=OverviewResponse)
 async def get_genomic_input(
     bed_file: Optional[UploadFile] = File(None),
@@ -164,6 +200,122 @@ async def get_genomic_input(
         peak_list=peak_list
     )
 
+
+def _save_session(session_id: str, datasets: List[DatasetInfo]):
+    with open(os.path.join(TMP_DIR, f"{session_id}_datasets.pkl"), "wb") as f:
+        pickle.dump(datasets, f)
+
+def _load_session(session_id: str) -> List[DatasetInfo]:
+    try:
+        with open(os.path.join(TMP_DIR, f"{session_id}_datasets.pkl"), "rb") as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Unknown comparison session_id")
+
+def _create_dataset_from_inputs(
+    bed_file: Optional[UploadFile],
+    gene_list_file: Optional[UploadFile],
+    window_size: int
+) -> tuple[str, pd.DataFrame, Dict[str, float], List[str]]:
+    """
+    Returns (data_id, peaks_df, gene_lfc, ordered_peak_list)
+    """
+    os.makedirs(TMP_DIR, exist_ok=True)
+    if bed_file is None and gene_list_file is None:
+        raise HTTPException(status_code=400, detail="Provide a gene list or a BED file")
+
+    bed_path = None
+    if bed_file is not None:
+        bed_path = os.path.join(TMP_DIR, f"{uuid.uuid4().hex}.bed")
+        with open(bed_path, "wb") as out:
+            shutil.copyfileobj(bed_file.file, out)
+
+    gene_list: List[str] = []
+    gene_lfc: Dict[str, float] = {}
+
+    if gene_list_file:
+        gene_list_path = os.path.join(TMP_DIR, f"{uuid.uuid4().hex}.csv")
+        with open(gene_list_path, "wb") as f:
+            shutil.copyfileobj(gene_list_file.file, f)
+        with open(gene_list_path, newline="", encoding="utf-8-sig") as inp:
+            reader = csv.reader(inp, delimiter=",")
+            for i, row in enumerate(reader):
+                if not row or not row[0].strip():
+                    continue
+                first_cell = row[0].strip().lower()
+                if i == 0 and ("gene" in first_cell or "symbol" in first_cell):
+                    continue
+                gene_list.append(row[0].strip())
+
+        # dummy rank-based LFC
+        N = len(gene_list)
+        gene_lfc = {g: float(N - idx) for idx, g in enumerate(gene_list)}
+
+    peaks_df = process_genomic_input(
+        genome_filepath="fasta/genome.fa",
+        gtf_filepath="fasta/dmel_genes.gtf",
+        bed_path=bed_path,
+        window_size=window_size,
+        gene_list=gene_list,
+        gene_lfc=gene_lfc,
+    )
+    if peaks_df.empty:
+        raise HTTPException(status_code=400, detail="No matching genes detected. Please check your input.")
+
+    data_id = uuid.uuid4().hex
+    peaks_df.to_pickle(os.path.join(TMP_DIR, f"{data_id}_peaks.pkl"))
+    if gene_list:
+        with open(os.path.join(TMP_DIR, f"{data_id}_genes.pkl"), "wb") as f:
+            pickle.dump(gene_list, f)
+        with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
+            pickle.dump(gene_lfc, lf)
+
+    def extract_gene(pid: str) -> str:
+        return re.split(r"_FBtr", pid)[0]
+
+    peak_list = list(peaks_df["Peak_ID"])
+    peak_list = sorted(peak_list, key=lambda pid: abs(gene_lfc.get(extract_gene(pid), float("-inf"))))
+    return data_id, peaks_df, gene_lfc, peak_list
+@app.post("/get-genomic-input-compare", response_model=CompareInitResponse)
+async def get_genomic_input_compare(
+    # list A
+    bed_file_a: Optional[UploadFile] = File(None),
+    gene_list_file_a: Optional[UploadFile] = File(None),
+    label_a: str = Form("List A"),
+    # list B
+    bed_file_b: Optional[UploadFile] = File(None),
+    gene_list_file_b: Optional[UploadFile] = File(None),
+    label_b: str = Form("List B"),
+    # shared
+    window_size: int = Form(500),
+):
+    # build datasets
+    data_id_a, peaks_a, lfc_a, peak_list_a = _create_dataset_from_inputs(bed_file_a, gene_list_file_a, window_size)
+    data_id_b, peaks_b, lfc_b, peak_list_b = _create_dataset_from_inputs(bed_file_b, gene_list_file_b, window_size)
+
+    session_id = uuid.uuid4().hex
+    datasets = [
+        DatasetInfo(data_id=data_id_a, label=label_a, peak_list=peak_list_a),
+        DatasetInfo(data_id=data_id_b, label=label_b, peak_list=peak_list_b),
+    ]
+    _save_session(session_id, datasets)
+    return CompareInitResponse(session_id=session_id, datasets=datasets)
+
+@app.post("/validate-motifs-group")
+async def validate_motifs_group(
+    motifs: list[str] = Form(...),
+    session_id: str = Form(...),
+):
+    try:
+        motif_inputs = [json.loads(m) for m in motifs]
+        motif_list = get_motif_list(motif_inputs)
+        with open(f"{TMP_DIR}/{session_id}_motif_list.pkl", "wb") as f:
+            pickle.dump(motif_list, f)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid motifs: {e}")
+    return {"status": "ok", "count": len(motif_list)}
+
+
 @app.post("/validate-motifs")
 async def validate_motifs(
     motifs: list[str] = Form(...),
@@ -174,19 +326,44 @@ async def validate_motifs(
         motif_inputs = [json.loads(m) for m in motifs]
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Malformed motif JSON: {e}")
-
-    # run your get_motif_list (this will raise ValueError on any bad motif)
     try:
         motif_list = get_motif_list(motif_inputs)
         with open(f"{TMP_DIR}/{data_id}_motif_list.pkl", "wb") as f:
             pickle.dump(motif_list, f)
     except ValueError as e:
-        # send back exactly what failed
         raise HTTPException(status_code=400, detail=str(e))
-
-    # if you like, cache it for this session / data_id; or just return success
     return {"status": "ok", "count": len(motif_list)}
 
+@app.post("/get-motif-hits-batch", response_model=BatchScanResponse)
+async def get_motif_hits_batch(
+    session_id: str = Form(...),
+    window: int = Form(500),
+    fimo_threshold: float = Form(0.005),
+):
+    datasets = _load_session(session_id)
+
+    # load session-level motifs
+    try:
+        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Run /validate-motifs-group first for this session")
+
+    scanned_ids = []
+    for ds in datasets:
+        try:
+            peaks_df = pd.read_pickle(f"{TMP_DIR}/{ds.data_id}_peaks.pkl")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"No cached peaks for {ds.data_id}")
+
+        motif_hits, df_hits = scan_wrapper(peaks_df, "fasta/genome.fa", window, motif_list, fimo_threshold)
+
+        with open(f"{TMP_DIR}/{ds.data_id}_motif_hits.pkl", "wb") as f:
+            pickle.dump(motif_hits, f)
+        with open(f"{TMP_DIR}/{ds.data_id}_df_hits.pkl", "wb") as f:
+            pickle.dump(df_hits, f)
+        scanned_ids.append(ds.data_id)
+
+    return BatchScanResponse(session_id=session_id, datasets=scanned_ids)
 
 @app.post("/get-motif-hits", response_model=ScannerResponse)
 async def get_motif_hits(
@@ -219,57 +396,125 @@ async def get_motif_hits(
         "data_id": data_id
     }
 
+
+
+@app.post("/plot-motif-overview-compare", response_model=ComparePlotResponse)
+async def plot_motif_overview_compare(
+    session_id: str = Form(...),
+    window: int = Form(500),
+    per_motif_pvals_json: str = Form(default="")
+):
+    datasets = _load_session(session_id)
+
+    # shared motif list
+    try:
+        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached motif_list for this session")
+
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
+
+    figures: Dict[str, str] = {}
+    ordered: Dict[str, List[str]] = {}
+
+    for ds in datasets:
+        data_id = ds.data_id
+        label = ds.label
+
+        try:
+            peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
+            df_hits  = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
+            gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=f"Cache miss for dataset {label}: {e}")
+
+        peak_ranks = rank_peaks_for_plot(
+            df_hits=df_hits,
+            gene_lfc=gene_lfc,
+            peaks_df=peaks_df,
+            use_hit_number=False,
+            use_match_score=False,
+            motif=None,
+            min_score_bits=0.0,
+            per_motif_pvals=per_motif_pvals,
+        )
+
+        fig, ordered_peaks = plot_occurrence_overview_plotly(
+            peak_list=list(peak_ranks.keys()),
+            peaks_df=peaks_df,
+            motif_list=motif_list,
+            df_hits=df_hits,
+            window=window,
+            peak_rank=peak_ranks,
+            title=f"Motif hits — {label}",
+            min_score_bits=0.0,
+            per_motif_pvals=per_motif_pvals,
+        )
+
+        figures[label] = fig.to_json()
+        ordered[label] = ordered_peaks
+
+    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered)
+
 @app.post("/plot-motif-overview", response_model=PlotOverviewResponse)
 async def plot_motif_overview(
     request: Request,
     window: int = Form(500),
-    data_id: str = Form(...)
+    data_id: str = Form(...),
+    per_motif_pvals_json: str = Form(default="")   # NEW
 ):
- 
-    # 2) Load the peaks from the earlier get-genomic-input step
+    # Load cached data
     try:
         peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No cached peaks for given data_id")
+
     try:
         df_hits = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No cached motif_hits for given data_id")
+
     try:
         motif_list = pd.read_pickle(f"{TMP_DIR}/{data_id}_motif_list.pkl")
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached motif_hits for given data_id")
-    
+        raise HTTPException(status_code=404, detail="No cached motif_list for given data_id")
+
     try:
         gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No cached gene_logfc dict for given data_id")
 
-    # 5) Plot & return
-    out_png = os.path.join(TMP_DIR, f"{uuid.uuid4()}.png")
-    peak_list = list(peaks_df['Peak_ID'])
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
     peak_ranks = rank_peaks_for_plot(
-    df_hits=df_hits,
-    gene_lfc=gene_lfc,
-    peaks_df=peaks_df,
-    use_hit_number=False,
-    use_match_score=False,
-    motif=None,
-)
-    plot_path, peak_list = plot_occurence_overview(
-        peak_list=peak_list,
+        df_hits=df_hits,
+        gene_lfc=gene_lfc,
         peaks_df=peaks_df,
-        motifs=motif_list,
+        use_hit_number=False,
+        use_match_score=False,
+        motif=None,
+        min_score_bits=0.0,
+        per_motif_pvals=per_motif_pvals,    # NEW
+    )
+
+    fig, ordered_peaks = plot_occurrence_overview_plotly(
+        peak_list=list(peak_ranks.keys()),
+        peaks_df=peaks_df,
+        motif_list=motif_list,
         df_hits=df_hits,
         window=window,
-        peak_rank = peak_ranks,
-        output_path=out_png
+        peak_rank=peak_ranks,
+        title="Motif hits",
+        min_score_bits=0.0,
+        per_motif_pvals=per_motif_pvals,    # NEW
     )
-    url = request.url_for("tmp", path=os.path.basename(plot_path))
+
+    # Serialize Plotly figure to JSON
+    fig_json = fig.to_json()       # string; frontend will parse and render
+
     return {
-        "overview_image": str(url),
+        "overview_plot": fig_json,
         "data_id": data_id,
-        "peak_list": peak_list
+        "peak_list": ordered_peaks
     }
 
 @app.post("/filter-motif-hits", response_model=ScannerResponse)
@@ -278,24 +523,19 @@ async def filter_and_score(
     chip_bed: UploadFile = File(None),      # now optional
     data_id: str = Form(...),
 ):
-    # 1) At least one filter type must be provided
     if not atac_bed and not chip_bed:
         raise HTTPException(
             status_code=400,
             detail="You must provide at least one of ATAC or ChIP BED files."
         )
-
-    # 2) Load your cached motif‐hits
     try:
         with open(f"{TMP_DIR}/{data_id}_df_hits.pkl","rb") as f:
             df_hits = pickle.load(f)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Missing cache for data_id")
 
-    # Helper to make an *empty* hits‐DataFrame
     empty_hits = pd.DataFrame(columns=df_hits.columns)
 
-    # 3) If the user sent an ATAC file, save and filter; otherwise use empty
     if atac_bed:
         atac_path = os.path.join(TMP_DIR, f"{data_id}_atac.bed")
         with open(atac_path,"wb") as f:
@@ -306,7 +546,6 @@ async def filter_and_score(
     else:
         atac_filt_hits = empty_hits
 
-    # 4) Ditto for ChIP
     if chip_bed:
         chip_path = os.path.join(TMP_DIR, f"{data_id}_chip.bed")
         with open(chip_path,"wb") as f:
@@ -317,11 +556,8 @@ async def filter_and_score(
     else:
         chip_filt_hits = empty_hits
 
-    # 5) Now run your scorer.  Because chip_filt_hits or atac_filt_hits might be empty,
-    #    raw_scoring_chip/atac will end up generating zero‐counts for all (Peak_ID, Motif).
     scored_df = score_and_merge(df_hits, chip_filt_hits, atac_filt_hits)
 
-    # 6) And the rest of your pipeline is unchanged
     scored_df.to_csv("scored_df.csv")
     ranked_df = score_hit_naive_bayes(scored_df)
     top_hits = (
@@ -334,6 +570,188 @@ async def filter_and_score(
 
     return {"data_id": data_id}
 
+@app.post("/filter-motif-hits-batch", response_model=BatchScanResponse)
+async def filter_and_score_batch(
+    session_id: str = Form(...),
+    atac_bed_shared: UploadFile = File(None),
+    chip_bed_shared: UploadFile = File(None),
+    atac_bed_a: UploadFile = File(None),
+    chip_bed_a: UploadFile = File(None),
+    atac_bed_b: UploadFile = File(None),
+    chip_bed_b: UploadFile = File(None),
+):
+    datasets = _load_session(session_id)
+    if not datasets:
+        raise HTTPException(status_code=404, detail="Empty/unknown session")
+
+    any_shared = bool(atac_bed_shared or chip_bed_shared)
+    any_ab     = bool(atac_bed_a or chip_bed_a or atac_bed_b or chip_bed_b)
+    if not (any_shared or any_ab):
+        raise HTTPException(status_code=400, detail="Provide at least one ATAC or ChIP BED.")
+
+    # ---------- helper ----------
+    async def _filter_one_dataset(data_id: str, atac: bytes | None, chip: bytes | None) -> None:
+        try:
+            with open(f"{TMP_DIR}/{data_id}_df_hits.pkl","rb") as f:
+                df_hits = pickle.load(f)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Missing cache for data_id {data_id}")
+
+        empty_hits = pd.DataFrame(columns=df_hits.columns)
+
+        # ATAC
+        if atac:
+            atac_path = os.path.join(TMP_DIR, f"{data_id}_atac.bed")
+            with open(atac_path, "wb") as f:
+                f.write(atac)
+            atac_filt_hits = filter_motif_hits(df_hits, atac_path)
+        else:
+            atac_filt_hits = empty_hits
+        with open(f"{TMP_DIR}/{data_id}_atac_filt_hits.pkl","wb") as f:
+            pickle.dump(atac_filt_hits, f)
+
+        # ChIP
+        if chip:
+            chip_path = os.path.join(TMP_DIR, f"{data_id}_chip.bed")
+            with open(chip_path, "wb") as f:
+                f.write(chip)
+            chip_filt_hits = filter_motif_hits(df_hits, chip_path)
+        else:
+            chip_filt_hits = empty_hits
+        with open(f"{TMP_DIR}/{data_id}_chip_filt_hits.pkl","wb") as f:
+            pickle.dump(chip_filt_hits, f)
+
+        # scoring
+        scored_df = score_and_merge(df_hits, chip_filt_hits, atac_filt_hits)
+        ranked_df = score_hit_naive_bayes(scored_df)
+        top_hits = (
+            ranked_df.reset_index()
+                     .sort_values("P_regulatory", ascending=False)
+                     [["Peak_ID","Motif","P_regulatory","M_prom","M_chip","M_atac","logFC","FIMO_score"]]
+        )
+        top_hits.to_csv(f"{TMP_DIR}/{data_id}_top_hits.tsv", sep="\t", index=False)
+
+    processed: list[str] = []
+
+    if any_shared:
+        # Read ONCE, reuse the bytes across all datasets
+        atac_bytes = await atac_bed_shared.read() if atac_bed_shared else None
+        chip_bytes = await chip_bed_shared.read() if chip_bed_shared else None
+
+        for ds in datasets:
+            await _filter_one_dataset(ds.data_id, atac_bytes, chip_bytes)
+            processed.append(ds.data_id)
+    else:
+        if len(datasets) != 2:
+            raise HTTPException(status_code=400, detail="Per-dataset A/B uploads require exactly two datasets.")
+        # Read each upload ONCE
+        a_atac = await atac_bed_a.read() if atac_bed_a else None
+        a_chip = await chip_bed_a.read() if chip_bed_a else None
+        b_atac = await atac_bed_b.read() if atac_bed_b else None
+        b_chip = await chip_bed_b.read() if chip_bed_b else None
+
+        await _filter_one_dataset(datasets[0].data_id, a_atac, a_chip)
+        await _filter_one_dataset(datasets[1].data_id, b_atac, b_chip)
+        processed.extend([datasets[0].data_id, datasets[1].data_id])
+
+    return BatchScanResponse(session_id=session_id, datasets=processed)
+
+def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
+    # normalize kind
+    kind = modality.lower()
+    if kind not in {"atac","chip"}:
+        raise ValueError(f"Unknown kind {kind}")
+
+    p = os.path.join(TMP_DIR, f"{data_id}_{modality}_filt_hits.pkl")
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"Missing filtered hits: {p}")
+
+    df = pd.read_pickle(p)
+    # sanity: ensure expected cols exist
+    required = {"Peak_ID","Motif"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{p} missing columns: {missing}")
+
+    return df
+
+@app.post("/plot-filtered-overview-compare", response_model=ComparePlotResponse)
+async def plot_filtered_overview_compare(
+    session_id: str = Form(...),
+    window: int = Form(500),
+    chip: str = Form("false"),
+    atac: str = Form("false"),
+    use_hit_number: str = Form("false"),
+    use_match_score: str = Form("false"),
+    chosen_motif: str = Form(""),
+    per_motif_pvals_json: str = Form(default=""),
+):
+    chip            = chip.lower() == "true"
+    atac            = atac.lower() == "true"
+    use_hit_number  = use_hit_number.lower() == "true"
+    use_match_score = use_match_score.lower() == "true"
+
+    datasets = _load_session(session_id)
+
+    try:
+        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached motif_list for this session")
+
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
+
+    figures: Dict[str, str] = {}
+    ordered: Dict[str, List[str]] = {}
+
+    for ds in datasets:
+        data_id = ds.data_id
+        label   = ds.label
+
+        try:
+            peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
+            gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Missing cached genomic data for {label}")
+
+        # choose which hits table to plot
+        if not (chip or atac):
+            try:
+                df_to_plot = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"No cached df_hits for {label}")
+        else:
+            dfs = []
+            if chip: dfs.append(load_filtered_hits(data_id, "chip"))
+            if atac: dfs.append(load_filtered_hits(data_id, "atac"))
+            df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
+
+        peak_ranks = rank_peaks_for_plot(
+            df_hits=df_to_plot,
+            gene_lfc=gene_lfc,
+            peaks_df=peaks_df,
+            use_hit_number=use_hit_number,
+            use_match_score=use_match_score,
+            motif=(chosen_motif or None),
+            min_score_bits=0.0,
+            per_motif_pvals=per_motif_pvals,
+        )
+
+        fig, ordered_peaks = plot_occurrence_overview_plotly(
+            peak_list=list(peak_ranks.keys()),
+            peaks_df=peaks_df,
+            motif_list=motif_list,
+            df_hits=df_to_plot,
+            window=window,
+            peak_rank=peak_ranks,
+            title=f"Motif hits — {label}",
+            min_score_bits=0.0,
+            per_motif_pvals=per_motif_pvals,
+        )
+
+        figures[label] = fig.to_json()
+        ordered[label] = ordered_peaks
+
+    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered)
 
 @app.get("/download-top-hits/{data_id}")
 async def download_top_hits(data_id: str):
@@ -348,13 +766,15 @@ async def download_top_hits(data_id: str):
     )
 
 
-def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
+'''def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
     path = os.path.join(TMP_DIR, f"{data_id}_{modality}_filt_hits.pkl")
     try:
         return pd.read_pickle(path)
     except FileNotFoundError:
         # return empty DF with expected columns rather than 404
-        return pd.DataFrame(columns=["Peak_ID", "Motif", "Score_bits", "Rel_pos"])
+        return pd.DataFrame(columns=["Peak_ID", "Motif", "Score_bits", "Rel_pos"])''' 
+
+
 
 @app.post("/plot-filtered-overview", response_model=PlotOverviewResponse)
 async def plot_filtered_overview(
@@ -365,15 +785,14 @@ async def plot_filtered_overview(
     use_hit_number: str = Form("false"),
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(...),
-    data_id: str = Form(...)
+    data_id: str = Form(...),
+    per_motif_pvals_json: str = Form(default="")   # NEW
 ):
-    # parse booleans
     chip             = chip.lower() == "true"
     atac             = atac.lower() == "true"
     use_hit_number   = use_hit_number.lower() == "true"
     use_match_score  = use_match_score.lower() == "true"
 
-    # ——— 1) Load base data ———
     try:
         peaks_df   = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_peaks.pkl"))
         gene_lfc   = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"))
@@ -381,94 +800,238 @@ async def plot_filtered_overview(
     except FileNotFoundError:
         raise HTTPException(404, "No cached genomic data for given data_id")
 
-    # ——— 3) Build df_to_plot ———
-    selections = []
-    if chip:  
-        selections.append("chip")
-    if atac:  
-        selections.append("atac")
-
-    if not selections:
-        # no modality filter → use the raw union of both ChIP & ATAC hit
+    if not (chip or atac):
         df_to_plot = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
-        # default to sorting by hit‐number when no explicit flag
 
     else:
-        dfs = [load_filtered_hits(data_id, mod) for mod in selections]
-        df_to_plot = (
-            reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs)
-            if len(dfs) > 1 else dfs[0]
-        )
+        dfs = []
+        if chip: dfs.append(load_filtered_hits(data_id, "chip"))
+        if atac: dfs.append(load_filtered_hits(data_id, "atac"))
+        df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
 
-    # ——— 4) Compute peak ranks ———
-    # pass an empty DF if df_to_plot is None so the function sees a DataFrame type
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
+
     peak_ranks = rank_peaks_for_plot(
-        df_hits         = df_to_plot,
-        gene_lfc        = gene_lfc,
-        peaks_df        = peaks_df,
-        use_hit_number  = use_hit_number,
-        use_match_score = use_match_score,
-        motif           = chosen_motif,
+        df_hits=df_to_plot,
+        gene_lfc=gene_lfc,
+        peaks_df=peaks_df,
+        use_hit_number=use_hit_number,
+        use_match_score=use_match_score,
+        motif=chosen_motif,
+        min_score_bits=0.0,
+        per_motif_pvals=per_motif_pvals,     # NEW
     )
 
-    # ——— 5) Generate plot ———
-    out_png   = os.path.join(TMP_DIR, f"{uuid.uuid4().hex}.png")
-    peak_list = list(peaks_df["Peak_ID"])
-    plot_path, peak_list = plot_occurence_overview(
-        peak_list   = peak_list,
-        peaks_df    = peaks_df,
-        motifs      = motif_list,
-        df_hits     = df_to_plot,    # None if no filtering
-        window      = window,
-        peak_rank   = peak_ranks,
-        output_path = out_png,
+    fig, ordered_peaks = plot_occurrence_overview_plotly(
+        peak_list=list(peak_ranks.keys()),
+        peaks_df=peaks_df,
+        motif_list=motif_list,
+        df_hits=df_to_plot,
+        window=window,
+        peak_rank=peak_ranks,
+        title="Motif hits",
+        min_score_bits=0.0,
+        per_motif_pvals=per_motif_pvals,     # NEW
     )
 
-    url = request.url_for("tmp", path=os.path.basename(plot_path))
+    fig_json = fig.to_json()
+    return {"overview_plot": fig_json, "data_id": data_id, "peak_list": ordered_peaks}
+
+@app.post("/plot-chip-overlay")
+async def plot_chip_overlay_json(
+    request: Request,
+    data_id: str = Form(...),
+    bigwigs: List[UploadFile] = File(...),   # uploaded .bw files
+    chip_tracks: List[str] = Form(...),      # each "Label|#RRGGBB"
+    gene: str = Form(...),                   # Peak_ID
+    window: int = Form(500),
+    # optional filters to match your new plotting.py
+    per_motif_pvals_json: str = Form(default=""),
+    min_score_bits: float = Form(0.0),
+):
+    # ---- load cached inputs (new pipeline) ----
+    try:
+        peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached peaks for given data_id")
+
+    try:
+        with open(f"{TMP_DIR}/{data_id}_motif_list.pkl", "rb") as f:
+            motif_list = pickle.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached motif_list for given data_id")
+
+    try:
+        df_hits = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached motif_hits (df_hits) for given data_id")
+
+    # ---- ingest uploaded bigWigs ----
+    if len(bigwigs) != len(chip_tracks):
+        raise HTTPException(status_code=400, detail="Mismatch in bigwig and track metadata count")
+
+    os.makedirs(TMP_DIR, exist_ok=True)
+    bw_input: List[Tuple[str, str, str]] = []
+    try:
+        for i, bw_file in enumerate(bigwigs):
+            try:
+                label, color = chip_tracks[i].split("|", 1)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid track meta '{chip_tracks[i]}'. Use 'Label|#RRGGBB'.")
+
+            bw_path = os.path.join(TMP_DIR, f"{uuid.uuid4()}.bw")
+            with open(bw_path, "wb") as f:
+                shutil.copyfileobj(bw_file.file, f)
+            bw_input.append((bw_path, label.strip(), color.strip()))
+    finally:
+        # close upload handles
+        for uf in bigwigs:
+            try:
+                uf.file.close()
+            except Exception:
+                pass
+
+    # ---- build coverage for selected peak ----
+    coverage_data = fetch_bw_coverage(str(gene), peaks_df, bw_input)
+    # clean temp bigwigs (coverage_data holds arrays, files no longer needed)
+    for path, _, _ in bw_input:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+    if not coverage_data:
+        raise HTTPException(status_code=400, detail=f"No coverage data for {gene}")
+
+    # ---- filters ----
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
+
+    # ---- make plotly fig ----
+    fig = plot_chip_overlay(
+        coverage_data=coverage_data,
+        motif_list=motif_list,
+        df_hits=df_hits,
+        peaks_df=peaks_df,
+        peak_id=str(gene),
+        window=int(window),
+        per_motif_pvals=per_motif_pvals,
+        min_score_bits=float(min_score_bits),
+        title=f"{gene} - Motifs + Coverage",
+    )
+
+    # ---- return Plotly JSON like your /plot-motif-overview route ----
+    fig_json = fig.to_json()
+
     return {
-        "overview_image": str(url),
+        "chip_overlay_plot": fig_json,   # frontend parses and renders
         "data_id": data_id,
-        "peak_list": peak_list,
+        "gene": gene,
+        "tracks": [t.split("|", 1)[0] for t in chip_tracks],
+        "window": int(window),
+        "applied_pvals": per_motif_pvals or {},
+        "min_score_bits": float(min_score_bits),
     }
 
-@app.post("/plot-chip-overlay", response_class=FileResponse)
-async def plot_chip_overlay_route(
-    data_id: str = Form(...),
-    bigwigs: List[UploadFile] = File(...),
-    chip_tracks: List[str] = Form(...),
-    gene: str = Form(...),
-    window: int = Form(500)
+
+@app.post("/plot-chip-overlay-compare")
+async def plot_chip_overlay_compare_json(
+    request: Request,
+    session_id: str = Form(...),
+    label: str = Form(...),                 # "List A" or "List B" (or any label you used)
+    bigwigs: List[UploadFile] = File(...),  # uploaded .bw files
+    chip_tracks: List[str] = Form(...),     # each "Label|#RRGGBB"
+    gene: str = Form(...),                  # Peak_ID (from the chosen label's dataset)
+    window: int = Form(500),
+    per_motif_pvals_json: str = Form(default=""),
+    min_score_bits: float = Form(0.0),
 ):
-    temp_dir = "tmp"
+    # --- resolve data_id from session+label ---
+    datasets = _load_session(session_id)
+    try:
+        data_id = next(ds.data_id for ds in datasets if ds.label == label)
+    except StopIteration:
+        raise HTTPException(status_code=404, detail=f"No dataset with label '{label}' in session {session_id}")
 
-    # Load cached motif data
-    peaks_df = pd.read_pickle(f"{temp_dir}/{data_id}_peaks.pkl")
-    with open(f"{temp_dir}/{data_id}_motif_list.pkl", "rb") as f:
-        motif_list = pickle.load(f)
-    with open(f"{temp_dir}/{data_id}_motif_hits.pkl", "rb") as f:
-        motif_hits = pickle.load(f)
+    # ---- load cached inputs (same as single-mode endpoint) ----
+    try:
+        peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached peaks for given data_id")
 
-    # Save bigWigs
+    # motif list can be session-scoped (group-validated) or per-data_id; prefer session first
+    motif_list = None
+    try:
+        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
+    except FileNotFoundError:
+        # fallback: per-data_id
+        try:
+            with open(f"{TMP_DIR}/{data_id}_motif_list.pkl", "rb") as f:
+                motif_list = pickle.load(f)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="No cached motif_list for this session or data_id")
+
+    try:
+        df_hits = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No cached motif_hits (df_hits) for given data_id")
+
+    # ---- ingest uploaded bigWigs ----
     if len(bigwigs) != len(chip_tracks):
-        return {"error": "Mismatch in bigwig and track metadata count"}
+        raise HTTPException(status_code=400, detail="Mismatch in bigwig and track metadata count")
 
-    bw_input = []
-    for i, bw_file in enumerate(bigwigs):
-        label, color = chip_tracks[i].split("|")
-        bw_path = os.path.join(temp_dir, f"{uuid.uuid4()}.bw")
-        with open(bw_path, "wb") as f:
-            shutil.copyfileobj(bw_file.file, f)
-        bw_input.append((bw_path, label, color))
+    os.makedirs(TMP_DIR, exist_ok=True)
+    bw_input: List[Tuple[str, str, str]] = []
+    try:
+        for i, bw_file in enumerate(bigwigs):
+            try:
+                tr_label, color = chip_tracks[i].split("|", 1)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid track meta '{chip_tracks[i]}'. Use 'Label|#RRGGBB'.")
+            bw_path = os.path.join(TMP_DIR, f"{uuid.uuid4()}.bw")
+            with open(bw_path, "wb") as f:
+                shutil.copyfileobj(bw_file.file, f)
+            bw_input.append((bw_path, tr_label.strip(), color.strip()))
+    finally:
+        for uf in bigwigs:
+            try: uf.file.close()
+            except Exception: pass
 
-    # Plot
-    coverage_data = fetch_bw_coverage(gene, peaks_df, bw_input)
+    # ---- build coverage for selected peak ----
+    coverage_data = fetch_bw_coverage(str(gene), peaks_df, bw_input)
+    for path, _, _ in bw_input:
+        try: os.remove(path)
+        except Exception: pass
+
     if not coverage_data:
-        return {"error": f"No coverage data for {gene}"}
+        raise HTTPException(status_code=400, detail=f"No coverage data for {gene}")
 
-    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}.png")
-    plot_chip_overlay(coverage_data, motif_list, motif_hits, gene, window, output_path)
+    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
 
-    return FileResponse(output_path, media_type="image/png")
+    fig = plot_chip_overlay(
+        coverage_data=coverage_data,
+        motif_list=motif_list,
+        df_hits=df_hits,
+        peaks_df=peaks_df,
+        peak_id=str(gene),
+        window=int(window),
+        per_motif_pvals=per_motif_pvals,
+        min_score_bits=float(min_score_bits),
+        title=f"{label}: {gene} - Motifs + Coverage",
+    )
+
+    return {
+        "chip_overlay_plot": fig.to_json(),
+        "session_id": session_id,
+        "label": label,
+        "data_id": data_id,
+        "gene": gene,
+        "tracks": [t.split("|", 1)[0] for t in chip_tracks],
+        "window": int(window),
+        "applied_pvals": per_motif_pvals or {},
+        "min_score_bits": float(min_score_bits),
+    }
+
+
 
 @app.get("/get-tissues")
 async def get_tissues(
@@ -603,9 +1166,7 @@ async def run_streme_endpoint(
             if "gene" not in df.columns or "cell_types" not in df.columns:
                 raise HTTPException(status_code=500, detail="Required columns missing in DE data")
 
-            gene_list = (
-                df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist()
-            )
+            gene_list = (df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist())
 
             if not gene_list:
                 raise HTTPException(status_code=404, detail="No DE genes found for this tissue")
@@ -699,9 +1260,7 @@ async def filter_tfs(
         if "gene" not in df.columns or "cell_types" not in df.columns:
             raise HTTPException(status_code=500, detail="Required columns missing in DE data")
 
-        gene_list = (
-            df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist()
-        )
+        gene_list = (df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist())
 
         if not gene_list:
             raise HTTPException(status_code=404, detail="No DE genes found for this tissue")

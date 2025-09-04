@@ -29,7 +29,7 @@ const TFFinder: React.FC = () => {
       dispatch({ type: "SET_TISSUE_OPTIONS", payload: [] });
     }
   }, [stage, dataSource, dispatch]);
-  const top250Genes = genes.slice(0, 250).map((g) => g.gene);
+  const top250Genes = genes.slice(0, 150).map((g) => g.gene);
   return (
     <Container className="mt-4">
       <h2 className="text-center mb-4">TF Finder</h2>

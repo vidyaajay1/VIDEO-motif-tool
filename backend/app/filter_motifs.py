@@ -30,7 +30,7 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
     """
     # Build a BED-formatted string from hits_df
     bed_lines = "\n".join(
-        f"{row.Chromosome}\t{row.Hit_start}\t{row.Hit_end}\t{row.Peak_ID}\t{row.Rel_pos}\t{row.Score_bits}\t{row.Strand}\t{row.logFC}"
+        f"{row.Chromosome}\t{row.Hit_start}\t{row.Hit_end}\t{row.Peak_ID}\t{row.Rel_pos}\t{row.Score_bits}\t{row.Strand}\t{row.logFC}\t{row.Sequence}\t{row.p_value}"
         for row in hits_df.itertuples(index=False)
     ) + "\n"
 
@@ -41,13 +41,13 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
     print(f"[debug] motif hits loaded: {motif_bed.count()}")
     print(f"[debug] BED filter regions loaded: {filter_bed.count()}")
 
-    intersected = motif_bed.intersect(filter_bed, u=True)
+    intersected = motif_bed.intersect(filter_bed, u=True, f=0.5)
     print(f"[debug] overlaps found: {intersected.count()}")
     print("hits_df:\n", hits_df.head())
     # Extract filtered intervals
     filtered_records = []
     for iv in intersected:
-        chrom, start, end, peak_id, rel_pos, score, strand, logFC = iv.fields
+        chrom, start, end, peak_id, rel_pos, score, strand, logFC, seq, pval = iv.fields
         filtered_records.append({
             "Chromosome": chrom,
             "Hit_start": int(start),
@@ -56,7 +56,9 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
             "Rel_pos": int(rel_pos),
             "Score_bits": float(score),
             "Strand": strand,
-            "logFC": float(logFC)
+            "logFC": float(logFC),
+            "Sequence": str(seq),
+            "p_value": float(pval)
         })
 
     # Convert to DataFrame
@@ -67,9 +69,9 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
         filtered_df
         .merge(
             hits_df,
-            on=["Chromosome", "Hit_start", "Hit_end", "Peak_ID", "Rel_pos", "Score_bits", "Strand", "logFC"],
+            on=["Chromosome", "Hit_start", "Hit_end", "Peak_ID", "Rel_pos", "Score_bits", "Strand", "logFC", "Sequence", "p_value"],
             how="left"
-        )[["Peak_ID", "Motif", "Chromosome", "Hit_start", "Hit_end", "Rel_pos", "Score_bits", "Strand", "logFC"]]
+        )[["Peak_ID", "Motif", "Chromosome", "Hit_start", "Hit_end", "Rel_pos", "Score_bits", "Strand", "logFC", "Sequence", "p_value"]]
     )
 
     return result

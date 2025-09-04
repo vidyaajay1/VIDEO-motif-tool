@@ -1,11 +1,7 @@
 // MotifViewerContext.tsx
 import React, { createContext, useContext, useState, ReactNode } from "react";
 import { UserMotif } from "../components/GetMotifInput";
-import { FilterSettings } from "../components/MotifOccurencePlot";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
-// -------------------- Types --------------------
 type DataType = "bed" | "genes";
 
 interface MotifViewerContextType {
@@ -33,6 +29,10 @@ interface MotifViewerContextType {
   filteredOverviewUrl: string | null;
   setFilteredOverviewUrl: React.Dispatch<React.SetStateAction<string | null>>;
 
+  /** NEW: FIMO p-value threshold shared across steps (as string to match inputs) */
+  fimoThreshold: string;
+  setFimoThreshold: React.Dispatch<React.SetStateAction<string>>;
+
   fetchJSON: (
     url: string,
     opts: RequestInit,
@@ -40,20 +40,17 @@ interface MotifViewerContextType {
   ) => Promise<any>;
 }
 
-// -------------------- Context --------------------
 const MotifViewerContext = createContext<MotifViewerContextType | undefined>(
   undefined
 );
 
 export const useMotifViewer = () => {
-  const context = useContext(MotifViewerContext);
-  if (!context) {
+  const ctx = useContext(MotifViewerContext);
+  if (!ctx)
     throw new Error("useMotifViewer must be used within a MotifViewerProvider");
-  }
-  return context;
+  return ctx;
 };
 
-// -------------------- Provider --------------------
 export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
   const [dataType, setDataType] = useState<DataType>("bed");
   const [bedFile, setBedFile] = useState<File | null>(null);
@@ -78,6 +75,9 @@ export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
   const [filteredOverviewUrl, setFilteredOverviewUrl] = useState<string | null>(
     null
   );
+
+  /** NEW: shared FIMO threshold (default 1e-3 to match current UI) */
+  const [fimoThreshold, setFimoThreshold] = useState<string>("0.001");
 
   const fetchJSON = async (
     url: string,
@@ -117,6 +117,8 @@ export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
         setOverviewUrl,
         filteredOverviewUrl,
         setFilteredOverviewUrl,
+        fimoThreshold, // NEW
+        setFimoThreshold, // NEW
         fetchJSON,
       }}
     >

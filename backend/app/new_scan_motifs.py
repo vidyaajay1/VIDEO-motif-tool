@@ -135,6 +135,8 @@ def build_motif_hits(
         stop  = int(hit['stop'])
         strand= hit['strand']
         score = float(hit['score'])
+        seq = str(hit['matched_sequence'])
+        pval = float(hit['p-value'])
 
         # fetch the matching peak metadata
         if seqnm not in peaks.index:
@@ -160,11 +162,13 @@ def build_motif_hits(
                      rel_pos,
                      score,
                      strand,
-                     peak_lfc))
+                     peak_lfc, 
+                     seq,
+                     pval))
     rows = []
     for motif_name, by_gene in motif_hits.items():
         for gene, hits in by_gene.items():
-            for chrom, start, end, rel_pos, score, strand, peak_lfc in hits:
+            for chrom, start, end, rel_pos, score, strand, peak_lfc, seq, pval in hits:
                 rows.append({
                     "Peak_ID":       gene,
                     "Motif":      motif_name,
@@ -174,7 +178,9 @@ def build_motif_hits(
                     "Rel_pos":    rel_pos,
                     "Score_bits": score,
                     "Strand": strand,
-                    "logFC": peak_lfc
+                    "logFC": peak_lfc,
+                    "Sequence": seq,
+                    "p_value": pval,
                 })
     hits_df = pd.DataFrame(rows)
     return motif_hits, hits_df

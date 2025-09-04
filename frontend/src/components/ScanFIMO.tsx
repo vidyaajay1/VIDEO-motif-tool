@@ -1,8 +1,11 @@
+// ScanFIMO.tsx
 import React, { useState, useCallback } from "react";
 import { UserMotif } from "./GetMotifInput";
 import InfoTip from "./InfoTip";
+import { useMotifViewer } from "../context/MotifViewerContext";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+
 export interface ScanFIMOProps {
   dataId: string | null;
   inputWindow: number;
@@ -17,6 +20,10 @@ export interface ScanFIMOProps {
   onError: (msg: string) => void;
   scanComplete: boolean;
   onScanComplete?: () => void;
+
+  // NEW
+  compareMode?: boolean;
+  sessionId?: string | null;
 }
 
 const ScanFIMO: React.FC<ScanFIMOProps> = ({
@@ -29,10 +36,39 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
   onError,
   scanComplete,
   onScanComplete,
+
+  // NEW
+  compareMode = false,
+  sessionId = null,
 }) => {
-  const [fimoThreshold, setFimoThreshold] = useState<string>("0.005");
+  const { fimoThreshold, setFimoThreshold } = useMotifViewer();
 
   const handleMotifScan = useCallback(async () => {
+    // ---------- COMPARE MODE ----------
+    if (compareMode) {
+      if (!sessionId) {
+        onError("Please create the comparison session first (step 0).");
+        return;
+      }
+      // Motifs were already validated via /validate-motifs-group
+      const fd = new FormData();
+      fd.append("session_id", sessionId);
+      fd.append("window", String(inputWindow));
+      fd.append("fimo_threshold", String(fimoThreshold));
+
+      const json = await fetchJSON(
+        `${API_BASE}/get-motif-hits-batch`,
+        { method: "POST", body: fd },
+        onError
+      );
+      if (!json) return;
+
+      onError("Motif scan completed for both lists.");
+      onScanComplete?.();
+      return;
+    }
+
+    // ---------- SINGLE-LIST MODE ----------
     if (!dataId) {
       onError("Please process genomic input first");
       return;
@@ -68,7 +104,7 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
       fd.append("motifs", JSON.stringify(payload));
     });
     fd.append("window", String(inputWindow));
-    fd.append("fimo_threshold", fimoThreshold);
+    fd.append("fimo_threshold", String(fimoThreshold));
     fd.append("data_id", dataId);
 
     const json = await fetchJSON(
@@ -81,6 +117,8 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
     onError("Motif scan completed and saved to backend.");
     onScanComplete?.();
   }, [
+    compareMode,
+    sessionId,
     dataId,
     validMotifs,
     selectedStremeMotifs,
@@ -91,6 +129,8 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
     onError,
     onScanComplete,
   ]);
+
+  const disabled = compareMode ? !sessionId : !dataId;
 
   return (
     <div className="mt-3 text-center">
@@ -116,7 +156,7 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
           onChange={(e) => setFimoThreshold(e.target.value)}
           className="form-control d-inline-block ml-2"
           style={{ width: "100px" }}
-          disabled={!dataId} // only disable if no dataId
+          disabled={disabled}
         />
       </div>
       <div className="mt-2">
@@ -124,7 +164,7 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
           type="button"
           className={`btn ${scanComplete ? "btn-success" : "btn-primary"}`}
           onClick={handleMotifScan}
-          disabled={!dataId}
+          disabled={disabled}
         >
           🔍 {scanComplete ? "Re-scan Motifs" : "Scan Motifs (FIMO)"}
         </button>
@@ -134,9 +174,11 @@ const ScanFIMO: React.FC<ScanFIMOProps> = ({
           FIMO: Grant et al. <i>Bioinformatics</i> 2011
         </small>
       </div>
-      {!dataId && (
+      {disabled && (
         <small className="form-text text-muted">
-          Please process genomic input to enable scanning.
+          {compareMode
+            ? "Process both gene lists to create a session."
+            : "Please process genomic input to enable scanning."}
         </small>
       )}
     </div>

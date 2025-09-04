@@ -1,0 +1,43 @@
+.app-wrapper {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  --sidebar-w: 200px;      /* expanded */
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  transition: width .3s ease, flex-basis .3s ease;
+}
+
+.app-wrapper.is-collapsed .sidebar {
+  --sidebar-w: 80px;       /* collapsed */
+}
+
+.main-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Motif p-value thresholds accordion theme */
+.mv-accordion .accordion-item {
+  border: 1px solid #e6ecf2;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Header: soft blue */
+.mv-accordion .accordion-button {
+  background-color: #eaf2ff;      /* tweak color here */
+  color: #020409;
+  font-weight: 600;
+}
+.mv-accordion .accordion-button:not(.collapsed) {
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.08);
+}
+
+/* Body: very light background to reduce stark white */
+.mv-accordion .accordion-body {
+  background-color: #fbfdff;
+}

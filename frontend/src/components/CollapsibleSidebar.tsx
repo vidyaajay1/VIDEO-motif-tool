@@ -1,24 +1,27 @@
-import React, { useState, CSSProperties } from "react";
+import React, { CSSProperties } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { FaBars, FaEye, FaSearch } from "react-icons/fa";
 import { Nav } from "react-bootstrap";
 import { Link } from "react-router-dom";
 
-export default function CollapsibleSidebar() {
-  const [isOpen, setIsOpen] = useState(true);
-  const toggleSidebar = () => setIsOpen((prev) => !prev);
+export default function CollapsibleSidebar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  const isOpen = !collapsed;
 
-  const sidebarStyle: CSSProperties = {
-    width: isOpen ? "200px" : "80px",
-    transition: "width 0.3s",
-    overflow: "hidden",
+  const containerStyle: React.CSSProperties = {
     minHeight: "100vh",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
+    overflow: "hidden",
   };
 
-  const linkStyle: CSSProperties = {
+  const linkStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: isOpen ? "flex-start" : "center",
@@ -27,10 +30,11 @@ export default function CollapsibleSidebar() {
   };
 
   return (
-    <div className="bg-dark text-white" style={sidebarStyle}>
+    <div className="bg-dark text-white" style={containerStyle}>
       <button
         className="btn btn-outline-light btn-sm mt-3"
-        onClick={toggleSidebar}
+        onClick={() => onToggle(!collapsed)}
+        aria-label="Toggle Sidebar"
       >
         <FaBars />
       </button>
@@ -54,7 +58,6 @@ export default function CollapsibleSidebar() {
           <FaEye className="me-2 ms-3" />
           {isOpen && "Motif Viewer"}
         </Nav.Link>
-
         <Nav.Link
           as={Link}
           to="/tf-finder"

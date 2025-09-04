@@ -1,5 +1,6 @@
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+import json
 
 #part 0: utils
 BASE_TABLE = np.full(256, -1, dtype=np.int8)
@@ -53,3 +54,23 @@ def compute_max_motif_score(
         for (_c, _s, _e, _d, score) in hits
     )
     return max(all_scores, default=0.0)
+
+
+def _parse_per_motif_pvals(raw: Optional[str]) -> Dict[str, float]:
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            return {}
+        out = {}
+        for k, v in obj.items():
+            try:
+                fv = float(v)
+                if fv >= 0:   # leave validation simple; UI can enforce upper bounds
+                    out[str(k)] = fv
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
