@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 import InfoTip from "./InfoTip";
+import { useMotifViewer } from "../context/MotifViewerContext";
 
 export interface GetFilterDataProps {
   dataId: string | null;
@@ -21,6 +22,8 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
   const [chipBedFile, setChipBedFile] = useState<File | null>(null);
   const [showDownload, setShowDownload] = useState<boolean>(false);
   const [filterComplete, setFilterComplete] = useState(false);
+  const { singleTopHitsReady, setSingleTopHitsReady } = useMotifViewer();
+
   // ← Reset filtered state whenever the underlying data changes
   // whenever we get a brand new scanVersion (or dataId/scanComplete changes),
   // clear out the “Filtered!” state so the button goes back to primary
@@ -60,6 +63,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
       }
 
       // indicate success & show TSV download link
+      setSingleTopHitsReady(true);
       setFilterComplete(true);
     } catch (e: any) {
       onError(e.message);

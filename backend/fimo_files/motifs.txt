@@ -24,7 +24,7 @@ strands: + -
 Background letter frequencies
 A 0.250000 C 0.250000 G 0.250000 T 0.250000
 
-MOTIF 1-creba
+MOTIF 1-crebA
 letter-probability matrix: alength= 4 w= 7 nsites= 20 E= 0
 0.000000 0.000000 0.500000 0.500000
 1.000000 0.000000 0.000000 0.000000

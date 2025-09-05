@@ -1,4 +1,10 @@
 {
     "workbench.colorTheme": "Monokai",
-    "workbench.preferredLightColorTheme": "Monokai"
+    "workbench.preferredLightColorTheme": "Monokai",
+
+
+  "python.defaultInterpreterPath": "/Users/vidyaajay/Desktop/VIDEO/backend/venv/bin/python",
+  "python.terminal.activateEnvironment": true
+
+
 }

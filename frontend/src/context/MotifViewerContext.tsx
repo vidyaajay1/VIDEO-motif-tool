@@ -3,6 +3,13 @@ import React, { createContext, useContext, useState, ReactNode } from "react";
 import { UserMotif } from "../components/GetMotifInput";
 
 type DataType = "bed" | "genes";
+type CompareResults = {
+  [sessionId: string]: {
+    filtered: boolean;
+    processedIds: string[]; // data_ids returned by /filter-motif-hits-batch
+  };
+};
+type DataIdLabels = Record<string, string>;
 
 interface MotifViewerContextType {
   dataType: DataType;
@@ -32,6 +39,18 @@ interface MotifViewerContextType {
   /** NEW: FIMO p-value threshold shared across steps (as string to match inputs) */
   fimoThreshold: string;
   setFimoThreshold: React.Dispatch<React.SetStateAction<string>>;
+
+  compareResults: CompareResults;
+  setCompareResults: React.Dispatch<React.SetStateAction<CompareResults>>;
+  setCompareSessionResults: (
+    sessionId: string,
+    data: { filtered: boolean; processedIds: string[] }
+  ) => void;
+
+  singleTopHitsReady: boolean;
+  setSingleTopHitsReady: React.Dispatch<React.SetStateAction<boolean>>;
+  labelsByDataId: DataIdLabels;
+  setLabelsByDataId: React.Dispatch<React.SetStateAction<DataIdLabels>>;
 
   fetchJSON: (
     url: string,
@@ -78,7 +97,7 @@ export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
 
   /** NEW: shared FIMO threshold (default 1e-3 to match current UI) */
   const [fimoThreshold, setFimoThreshold] = useState<string>("0.001");
-
+  const [labelsByDataId, setLabelsByDataId] = useState<DataIdLabels>({});
   const fetchJSON = async (
     url: string,
     opts: RequestInit,
@@ -92,6 +111,16 @@ export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
       onError(e.message);
       return null;
     }
+  };
+
+  const [compareResults, setCompareResults] = useState<CompareResults>({});
+  const [singleTopHitsReady, setSingleTopHitsReady] = useState(false);
+
+  const setCompareSessionResults = (
+    sessionId: string,
+    data: { filtered: boolean; processedIds: string[] }
+  ) => {
+    setCompareResults((prev) => ({ ...prev, [sessionId]: data }));
   };
 
   return (
@@ -119,6 +148,13 @@ export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
         setFilteredOverviewUrl,
         fimoThreshold, // NEW
         setFimoThreshold, // NEW
+        compareResults,
+        setCompareResults,
+        setCompareSessionResults,
+        singleTopHitsReady,
+        setSingleTopHitsReady,
+        labelsByDataId, // ✅ ADDED
+        setLabelsByDataId, // ✅ ADDED
         fetchJSON,
       }}
     >

@@ -65,8 +65,8 @@ function MotifViewer() {
     scanComplete,
     setScanComplete,
     fimoThreshold,
-    // OLD: overviewUrl / filteredOverviewUrl were PNG URLs.
-    // We'll keep *local state* for JSON instead to avoid touching your context.
+    labelsByDataId,
+    setLabelsByDataId,
     fetchJSON,
   } = useMotifViewer();
 
@@ -145,7 +145,11 @@ function MotifViewer() {
       setDataId(json.datasets[0]?.data_id ?? null);
       setPeakList(json.datasets[0]?.peak_list ?? []);
       setScanComplete(false);
-
+      const mapping: Record<string, string> = {};
+      json.datasets.forEach((ds: any) => {
+        mapping[ds.data_id] = ds.label;
+      });
+      setLabelsByDataId(mapping);
       // clear plots
       setOverviewFigureJson(null);
       setFilteredOverviewFigureJson(null);
@@ -404,6 +408,15 @@ function MotifViewer() {
           <Card.Body>
             {activeStep === 0 && (
               <>
+                <h4 className="text-center mb-3 mt-1">
+                  Set up genomic input{" "}
+                  <InfoTip
+                    text="Upload a BED file for a single list, or compare two gene lists by CSV. Window size sets +/- bp around TSS."
+                    placement="right"
+                    id="genomic-input-info"
+                  />
+                </h4>
+
                 <CompareInputs
                   compareMode={compareMode}
                   setCompareMode={setCompareMode}
@@ -416,7 +429,9 @@ function MotifViewer() {
                   geneListFileB={geneListFileB}
                   setGeneListFileB={setGeneListFileB}
                 />
+
                 <GenomicInput
+                  compareMode={compareMode} // NEW: pass compareMode down
                   dataType={dataType}
                   setDataType={setDataType}
                   bedFile={bedFile}
@@ -429,6 +444,16 @@ function MotifViewer() {
                     if (compareMode) await handleGetGenomicInputCompare();
                     else await handleGetGenomicInput();
                   }}
+                  // Optional simple guard so users don’t click “Process” too soon
+                  canProcess={
+                    compareMode
+                      ? Boolean(
+                          labelA && labelB && geneListFileA && geneListFileB
+                        )
+                      : dataType === "bed"
+                      ? Boolean(bedFile)
+                      : Boolean(geneListFile)
+                  }
                 />
               </>
             )}
@@ -535,7 +560,7 @@ function MotifViewer() {
                   onDone={() => {
                     // You can trigger a re-plot here or just advance.
                     // The step 4 UI lets users generate filtered plots as needed.
-                    goNext();
+                    //goNext();
                   }}
                   onError={alert}
                 />
@@ -547,7 +572,7 @@ function MotifViewer() {
                   onFilteredOverview={(figureJson: string | null) => {
                     // (Single mode) You were previously using this to advance; keep it.
                     setFilteredOverviewFigureJson(figureJson);
-                    goNext();
+                    //goNext();
                   }}
                   onError={alert}
                 />

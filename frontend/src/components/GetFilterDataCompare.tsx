@@ -1,46 +1,39 @@
 import React, { useState, useEffect, useCallback } from "react";
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+import { useMotifViewer } from "../context/MotifViewerContext";
 
 type Props = {
   sessionId: string;
   scanComplete: boolean;
   scanVersion: number;
-  onDone: () => void; // call when filter+score is done (to goNext)
+  onDone: () => void;
   onError: (msg: string) => void;
+  // Optional: if you can map data_id -> pretty label, pass it in
+  labelsByDataId?: Record<string, string>;
 };
+const GetFilterDataCompare: React.FC<Props> = (props) => {
+  const { sessionId, scanComplete, scanVersion, onDone, onError } = props;
+  const { compareResults, setCompareSessionResults, labelsByDataId } =
+    useMotifViewer();
 
-const GetFilterDataCompare: React.FC<Props> = ({
-  sessionId,
-  scanComplete,
-  scanVersion,
-  onDone,
-  onError,
-}) => {
-  // mode: shared uploads for both lists vs per-dataset A/B uploads
+  const existing = compareResults[sessionId];
+  const filterComplete = !!existing?.filtered;
+  const processedIds = existing?.processedIds ?? [];
+
+  // local only for file inputs & toggle
   const [useShared, setUseShared] = useState(true);
-
-  // shared files
   const [atacShared, setAtacShared] = useState<File | null>(null);
   const [chipShared, setChipShared] = useState<File | null>(null);
-
-  // per-list files
   const [atacA, setAtacA] = useState<File | null>(null);
   const [chipA, setChipA] = useState<File | null>(null);
   const [atacB, setAtacB] = useState<File | null>(null);
   const [chipB, setChipB] = useState<File | null>(null);
 
-  const [filterComplete, setFilterComplete] = useState(false);
-
-  // reset when scan changes
+  // When scanVersion truly changes (a new scan), clear *only* this session’s results
   useEffect(() => {
-    setFilterComplete(false);
-    setAtacShared(null);
-    setChipShared(null);
-    setAtacA(null);
-    setChipA(null);
-    setAtacB(null);
-    setChipB(null);
-  }, [sessionId, scanComplete, scanVersion]);
+    setCompareSessionResults(sessionId, { filtered: false, processedIds: [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, scanVersion]);
 
   const canSubmit = useShared
     ? !!(atacShared || chipShared)
@@ -54,7 +47,6 @@ const GetFilterDataCompare: React.FC<Props> = ({
     try {
       const fd = new FormData();
       fd.append("session_id", sessionId);
-
       if (useShared) {
         if (atacShared) fd.append("atac_bed_shared", atacShared);
         if (chipShared) fd.append("chip_bed_shared", chipShared);
@@ -70,9 +62,14 @@ const GetFilterDataCompare: React.FC<Props> = ({
         body: fd,
       });
       if (!res.ok) throw new Error(await res.text());
+      const payload = await res.json(); // { session_id, datasets: string[] }
 
-      setFilterComplete(true);
-      onDone(); // advance to the next step
+      setCompareSessionResults(sessionId, {
+        filtered: true,
+        processedIds: payload.datasets ?? [],
+      });
+
+      onDone?.();
     } catch (e: any) {
       onError(e.message ?? String(e));
     }
@@ -87,8 +84,9 @@ const GetFilterDataCompare: React.FC<Props> = ({
     chipA,
     atacB,
     chipB,
-    onError,
     onDone,
+    onError,
+    setCompareSessionResults,
   ]);
 
   return (
@@ -209,6 +207,28 @@ const GetFilterDataCompare: React.FC<Props> = ({
       >
         {filterComplete ? "✅ Filtered!" : "🧪 Filter & Score (Batch)"}
       </button>
+
+      {filterComplete && (
+        <div className="mt-3 d-flex flex-column align-items-center gap-2">
+          {processedIds.map((id) => {
+            const label = labelsByDataId[id] ?? id; // fallback to id if missing
+            return (
+              <a
+                href={`${API_BASE}/download-top-hits/${encodeURIComponent(
+                  id
+                )}?label=${encodeURIComponent(label)}`}
+                className="btn btn-outline-secondary"
+                download
+              >
+                ⬇ Download Top Hits — {label}
+              </a>
+            );
+          })}
+          <div className="mt-2 text-success">
+            Motif hits have been filtered and scored!
+          </div>
+        </div>
+      )}
     </div>
   );
 };

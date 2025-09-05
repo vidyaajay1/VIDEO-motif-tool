@@ -1,4 +1,4 @@
-import os, uuid, shutil, pickle, json, csv, re
+import os, uuid, shutil, pickle, json, csv, re, io, zipfile
 import pandas as pd
 from functools import reduce
 from operator import and_
@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Request,  HTTPException, Query
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel, AnyUrl
 from app.new_process_input import process_genomic_input, get_motif_list
 from app.new_scan_motifs import scan_wrapper
@@ -656,6 +656,52 @@ async def filter_and_score_batch(
 
     return BatchScanResponse(session_id=session_id, datasets=processed)
 
+@app.get("/download-top-hits/{data_id}")
+async def download_top_hits(data_id: str, label: str | None = None):
+    file_path = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Top hits file not found")
+
+    safe_label = label or data_id  # fallback if label not provided
+    filename = f"{safe_label}_top_hits.tsv"
+
+    return FileResponse(
+        file_path,
+        media_type="text/tab-separated-values",
+        filename=filename,
+    )
+
+# --- Batch zip of all top_hits in the session ---
+@app.get("/download-top-hits-batch")
+def download_top_hits_batch(session_id: str):
+    datasets = _load_session(session_id)
+    if not datasets:
+        raise HTTPException(status_code=404, detail="Unknown or empty session_id")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        added_any = False
+        for ds in datasets:
+            data_id = ds.data_id
+            p = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
+            if os.path.exists(p):
+                # Name each file clearly inside the zip; fall back to data_id
+                inner_name = f"{getattr(ds, 'label', data_id)}_top_hits.tsv"
+                zf.write(p, arcname=inner_name)
+                added_any = True
+
+    if not added_any:
+        raise HTTPException(status_code=404, detail="No top_hits files found for this session.")
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="top_hits_{session_id}.zip"'
+        },
+    )
+
 def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
     # normalize kind
     kind = modality.lower()
@@ -753,28 +799,6 @@ async def plot_filtered_overview_compare(
 
     return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered)
 
-@app.get("/download-top-hits/{data_id}")
-async def download_top_hits(data_id: str):
-    file_path = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Top hits file not found")
-
-    return FileResponse(
-        file_path,
-        media_type="text/tab-separated-values",
-        filename="top_predicted_regulatory_hits.tsv"
-    )
-
-
-'''def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
-    path = os.path.join(TMP_DIR, f"{data_id}_{modality}_filt_hits.pkl")
-    try:
-        return pd.read_pickle(path)
-    except FileNotFoundError:
-        # return empty DF with expected columns rather than 404
-        return pd.DataFrame(columns=["Peak_ID", "Motif", "Score_bits", "Rel_pos"])''' 
-
-
 
 @app.post("/plot-filtered-overview", response_model=PlotOverviewResponse)
 async def plot_filtered_overview(
@@ -819,7 +843,7 @@ async def plot_filtered_overview(
         use_match_score=use_match_score,
         motif=chosen_motif,
         min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,     # NEW
+        per_motif_pvals=per_motif_pvals,    
     )
 
     fig, ordered_peaks = plot_occurrence_overview_plotly(
@@ -831,7 +855,7 @@ async def plot_filtered_overview(
         peak_rank=peak_ranks,
         title="Motif hits",
         min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,     # NEW
+        per_motif_pvals=per_motif_pvals,     
     )
 
     fig_json = fig.to_json()
@@ -919,7 +943,7 @@ async def plot_chip_overlay_json(
         title=f"{gene} - Motifs + Coverage",
     )
 
-    # ---- return Plotly JSON like your /plot-motif-overview route ----
+
     fig_json = fig.to_json()
 
     return {
@@ -1030,8 +1054,6 @@ async def plot_chip_overlay_compare_json(
         "applied_pvals": per_motif_pvals or {},
         "min_score_bits": float(min_score_bits),
     }
-
-
 
 @app.get("/get-tissues")
 async def get_tissues(

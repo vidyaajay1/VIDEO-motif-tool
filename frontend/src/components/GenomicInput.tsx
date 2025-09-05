@@ -15,6 +15,8 @@ export interface GenomicInputProps {
 
   inputWindow: number;
   setInputWindow: React.Dispatch<React.SetStateAction<number>>;
+  compareMode: boolean;
+  canProcess?: boolean;
 
   onProcess: () => Promise<void>;
 }
@@ -29,10 +31,11 @@ export default function GenomicInput({
   inputWindow,
   setInputWindow,
   onProcess,
+  compareMode,
+  canProcess = true,
 }: GenomicInputProps) {
   const [processed, setProcessed] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-
   const handleProcess = async () => {
     setProcessed(false);
     setIsProcessing(true);
@@ -47,18 +50,69 @@ export default function GenomicInput({
     }
   };
 
+  if (compareMode) {
+    return (
+      <section className="mb-5 text-center">
+        <div className="w-25 mx-auto mb-3">
+          <label className="form-label d-block">
+            Window size (bp)
+            <InfoTip
+              text="Distance ± from TSS for the genes in both lists."
+              placement="right"
+              id="genomic-input-info"
+            />
+          </label>
+          <input
+            type="number"
+            className="form-control"
+            value={inputWindow}
+            min={50}
+            step={50}
+            onChange={(e) => {
+              setInputWindow(+e.target.value);
+              setProcessed(false);
+            }}
+          />
+        </div>
+
+        <div className="text-center">
+          <button
+            className="btn btn-success"
+            onClick={handleProcess}
+            disabled={isProcessing || !canProcess}
+          >
+            {isProcessing ? (
+              <>
+                <Spinner
+                  as="span"
+                  animation="border"
+                  size="sm"
+                  role="status"
+                  aria-hidden="true"
+                  className="me-2"
+                />
+                Processing…
+              </>
+            ) : (
+              <>▶️ Process Genomic Input</>
+            )}
+          </button>
+          {processed && !isProcessing && (
+            <span className="badge bg-success ms-2">Processed!</span>
+          )}
+          {!canProcess && (
+            <div className="text-muted small mt-2">
+              Please provide both labels and CSVs above.
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // --- Regular (single-list) UI: keep existing controls ---
   return (
     <section className="mb-5 text-center">
-      <h4 className="text-center mb-3 mt-3">
-        Set up genomic input{" "}
-        <InfoTip
-          text="Upload your gene list as a CSV file with gene symbols or Flybase IDs, or a bed file with regions of interest. 
-      For gene lists, we treat it as ranked."
-          placement="right"
-          id="genomic-input-info"
-        />
-      </h4>
-
       <div className="d-flex justify-content-center align-items-center gap-4 mb-4">
         {["bed", "genes"].map((type) => (
           <label
@@ -76,15 +130,12 @@ export default function GenomicInput({
               }}
             />
             <span className="form-check-label">
-              {type === "bed"
-                ? "BED file"
-                : type === "genes"
-                ? "Gene list (CSV)"
-                : null}
+              {type === "bed" ? "BED file" : "Gene list (CSV)"}
             </span>
           </label>
         ))}
       </div>
+
       <div className="mx-auto" style={{ maxWidth: 300 }}>
         <Form.Group className="mb-4 text-center">
           <Form.Control
@@ -105,12 +156,12 @@ export default function GenomicInput({
           </Form.Text>
         </Form.Group>
       </div>
+
       <div className="w-25 mx-auto mb-3">
         <label className="form-label d-block">
           Window size (bp)
           <InfoTip
-            text="This is the distance from the TSS (+ and -) for gene lists and distance from the peak midpoints for BED files. 
-            We use this to fetch the sequences."
+            text="± distance from TSS (for gene list) or from peak midpoint (for BED)."
             placement="right"
             id="genomic-input-info"
           />
@@ -130,7 +181,7 @@ export default function GenomicInput({
         <button
           className="btn btn-success"
           onClick={handleProcess}
-          disabled={isProcessing}
+          disabled={isProcessing || !canProcess}
         >
           {isProcessing ? (
             <>
@@ -148,8 +199,6 @@ export default function GenomicInput({
             <>▶️ Process Genomic Input</>
           )}
         </button>
-
-        {/* only show the badge if done and not currently loading */}
         {processed && !isProcessing && (
           <span className="badge bg-success ms-2">Processed!</span>
         )}

@@ -21,7 +21,7 @@
 <setting name="pseudocount">0.1</setting>
 <setting name="verbosity">2</setting>
 </settings>
-<sequence-data num-sequences="278" num-residues="278278" />
+<sequence-data num-sequences="135" num-residues="135135" />
 <alphabet name="DNA" like="dna">
 <letter id="A" symbol="A" complement="T" name="Adenine" colour="CC0000"/>
 <letter id="C" symbol="C" complement="G" name="Cytosine" colour="0000CC"/>
@@ -39,7 +39,7 @@
 <letter id="Y" symbol="Y" equals="CT" name="Pyrimidine"/>
 <letter id="K" symbol="K" equals="GT" name="Keto"/>
 </alphabet>
-<motif name="1-creba" alt="" width="7" best-possible-match="TACGTGT"/>
+<motif name="1-crebA" alt="" width="7" best-possible-match="TACGTGT"/>
 <background source="--nrdb--">
 <value letter="A">0.275</value>
 <value letter="C">0.225</value>

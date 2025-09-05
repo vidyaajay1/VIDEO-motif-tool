@@ -23,5 +23,11 @@ jaspar_insect_pfms.txt
 tables2.xlsx
 TF_master_list.txt
 
+#fimo files
+backend/fimo_files/
+
+backend/app/
+*.ipynb
+
 backend/app/static
 *.svg
