@@ -26,6 +26,9 @@ TF_master_list.txt
 #fimo files
 backend/fimo_files/
 
+#tmp
+backend/tmp/
+
 backend/app/
 *.ipynb
 

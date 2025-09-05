@@ -558,7 +558,6 @@ async def filter_and_score(
 
     scored_df = score_and_merge(df_hits, chip_filt_hits, atac_filt_hits)
 
-    scored_df.to_csv("scored_df.csv")
     ranked_df = score_hit_naive_bayes(scored_df)
     top_hits = (
         ranked_df
