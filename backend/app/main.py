@@ -19,7 +19,7 @@ from app.bigwig_overlay import fetch_bw_coverage, plot_chip_overlay
 from app.run_streme import write_fasta_from_genes, run_streme_on_fasta, parse_streme_results
 from app.process_tomtom import subset_by_genes
 from app.filter_tfs import filter_tfs_from_gene_list
-from app.utils import _parse_per_motif_pvals
+from app.utils import _parse_per_motif_pvals, _df_to_records_json_safe, _df_to_csv_bytes
 from app.mem_logger import start_mem_logger
 
 class DatasetInfo(BaseModel):
@@ -37,8 +37,25 @@ class BatchScanResponse(BaseModel):
 
 class ComparePlotResponse(BaseModel):
     session_id: str
-    figures: Dict[str, str]           # {label: plotly_json}
-    ordered_peaks: Dict[str, List[str]]  # {label: [peak_ids]}
+    figures: Dict[str, str]
+    ordered_peaks: Dict[str, List[str]]
+    final_hits: Dict[str, List[Dict[str, Any]]]  # {label: [peak_ids]}
+    
+class OverviewResponse(BaseModel):
+    genome: str
+    peaks_df: List[Dict[str, Any]]
+    data_id: str
+    peak_list: List[str]
+
+# --- Update your response model to carry Plotly JSON ---
+class PlotOverviewResponse(BaseModel):
+    data_id: str
+    peak_list: List[str]          # ordered to match the plot
+    overview_plot: str            # Plotly figure as JSON string
+    final_hits: List[Dict[str, Any]] 
+
+class ScannerResponse(BaseModel):
+    data_id: str
 
 
 TMP_DIR = "tmp"
@@ -92,21 +109,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-class OverviewResponse(BaseModel):
-    genome: str
-    peaks_df: List[Dict[str, Any]]
-    data_id: str
-    peak_list: List[str]
-
-# --- Update your response model to carry Plotly JSON ---
-class PlotOverviewResponse(BaseModel):
-    data_id: str
-    peak_list: List[str]          # ordered to match the plot
-    overview_plot: str            # Plotly figure as JSON string
-
-class ScannerResponse(BaseModel):
-    data_id: str
-
 
 @app.get("/health")
 def health():
@@ -402,7 +404,9 @@ async def get_motif_hits(
 async def plot_motif_overview_compare(
     session_id: str = Form(...),
     window: int = Form(500),
-    per_motif_pvals_json: str = Form(default="")
+    per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),               # ← NEW
+    merge: str = Form("true"), 
 ):
     datasets = _load_session(session_id)
 
@@ -416,7 +420,11 @@ async def plot_motif_overview_compare(
 
     figures: Dict[str, str] = {}
     ordered: Dict[str, List[str]] = {}
-
+    final_hits: Dict[str, List[Dict[str, Any]]] = {}
+    dfs_by_label: Dict[str, pd.DataFrame] = {}  
+    merge_files     = merge.lower() in ("true", "1", "yes")
+    
+    datasets = _load_session(session_id)
     for ds in datasets:
         data_id = ds.data_id
         label = ds.label
@@ -438,8 +446,7 @@ async def plot_motif_overview_compare(
             min_score_bits=0.0,
             per_motif_pvals=per_motif_pvals,
         )
-
-        fig, ordered_peaks = plot_occurrence_overview_plotly(
+        fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
             peak_list=list(peak_ranks.keys()),
             peaks_df=peaks_df,
             motif_list=motif_list,
@@ -450,18 +457,49 @@ async def plot_motif_overview_compare(
             min_score_bits=0.0,
             per_motif_pvals=per_motif_pvals,
         )
-
         figures[label] = fig.to_json()
         ordered[label] = ordered_peaks
+        final_hits[label] = _df_to_records_json_safe(final_hits_df)   # NEW
+        dfs_by_label[label] = final_hits_df
+    # If download requested, return CSV/ZIP instead of JSON:
+    if download.lower() in ("true", "1", "csv", "zip"):
+        if merge_files:
+            merged = []
+            for label, df in dfs_by_label.items():
+                df2 = df.copy()
+                df2.insert(0, "Dataset", label)
+                merged.append(df2)
+            merged_df = pd.concat(merged, ignore_index=True) if merged else pd.DataFrame()
+            csv_bytes = _df_to_csv_bytes(merged_df)
+            filename = f"{session_id}_final_hits_merged.csv"
+            return Response(
+                content=csv_bytes,
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+        else:
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                for label, df in dfs_by_label.items():
+                    z.writestr(f"{label}_final_hits.csv", _df_to_csv_bytes(df))
+            zip_buf.seek(0)
+            filename = f"{session_id}_final_hits.zip"
+            return StreamingResponse(
+                zip_buf,
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
 
-    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered)
+    # default: JSON as before
+    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered, final_hits=final_hits)
 
 @app.post("/plot-motif-overview", response_model=PlotOverviewResponse)
 async def plot_motif_overview(
     request: Request,
     window: int = Form(500),
     data_id: str = Form(...),
-    per_motif_pvals_json: str = Form(default="")   # NEW
+    per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),    # NEW
 ):
     # Load cached data
     try:
@@ -496,7 +534,7 @@ async def plot_motif_overview(
         per_motif_pvals=per_motif_pvals,    # NEW
     )
 
-    fig, ordered_peaks = plot_occurrence_overview_plotly(
+    fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
         peak_list=list(peak_ranks.keys()),
         peaks_df=peaks_df,
         motif_list=motif_list,
@@ -505,16 +543,27 @@ async def plot_motif_overview(
         peak_rank=peak_ranks,
         title="Motif hits",
         min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,    # NEW
+        per_motif_pvals=per_motif_pvals,
     )
 
-    # Serialize Plotly figure to JSON
-    fig_json = fig.to_json()       # string; frontend will parse and render
+    fig_json = fig.to_json()
 
+    # Serialize final hits for the client
+    final_hits_records = _df_to_records_json_safe(final_hits_df)
+    # If the client asked for a file, return a CSV instead of JSON:
+    if download.lower() in ("true", "1", "csv"):
+        csv_bytes = _df_to_csv_bytes(final_hits_df)
+        filename = f"{data_id}_final_hits.csv"
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
     return {
         "overview_plot": fig_json,
         "data_id": data_id,
-        "peak_list": ordered_peaks
+        "peak_list": ordered_peaks,
+        "final_hits": final_hits_records,  # NEW
     }
 
 @app.post("/filter-motif-hits", response_model=ScannerResponse)
@@ -730,12 +779,14 @@ async def plot_filtered_overview_compare(
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(""),
     per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),               # ← NEW
+    merge: str = Form("true"), 
 ):
     chip            = chip.lower() == "true"
     atac            = atac.lower() == "true"
     use_hit_number  = use_hit_number.lower() == "true"
     use_match_score = use_match_score.lower() == "true"
-
+    merge_files     = merge.lower() in ("true", "1", "yes")
     datasets = _load_session(session_id)
 
     try:
@@ -747,6 +798,8 @@ async def plot_filtered_overview_compare(
 
     figures: Dict[str, str] = {}
     ordered: Dict[str, List[str]] = {}
+    final_hits: Dict[str, List[Dict[str, Any]]] = {}   # NEW
+    dfs_by_label: Dict[str, pd.DataFrame] = {}   # for file responses
 
     for ds in datasets:
         data_id = ds.data_id
@@ -758,7 +811,7 @@ async def plot_filtered_overview_compare(
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail=f"Missing cached genomic data for {label}")
 
-        # choose which hits table to plot
+        # Choose which hits table to plot
         if not (chip or atac):
             try:
                 df_to_plot = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
@@ -781,7 +834,7 @@ async def plot_filtered_overview_compare(
             per_motif_pvals=per_motif_pvals,
         )
 
-        fig, ordered_peaks = plot_occurrence_overview_plotly(
+        fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
             peak_list=list(peak_ranks.keys()),
             peaks_df=peaks_df,
             motif_list=motif_list,
@@ -795,8 +848,41 @@ async def plot_filtered_overview_compare(
 
         figures[label] = fig.to_json()
         ordered[label] = ordered_peaks
+        final_hits[label] = _df_to_records_json_safe(final_hits_df)   # NEW
+        dfs_by_label[label] = final_hits_df
 
-    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered)
+    # If download requested, return CSV/ZIP instead of JSON:
+    if download.lower() in ("true", "1", "csv", "zip"):
+        if merge_files:
+            merged = []
+            for label, df in dfs_by_label.items():
+                df2 = df.copy()
+                df2.insert(0, "Dataset", label)
+                merged.append(df2)
+            merged_df = pd.concat(merged, ignore_index=True) if merged else pd.DataFrame()
+            csv_bytes = _df_to_csv_bytes(merged_df)
+            filename = f"{session_id}_final_hits_merged.csv"
+            return Response(
+                content=csv_bytes,
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+        else:
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                for label, df in dfs_by_label.items():
+                    z.writestr(f"{label}_final_hits.csv", _df_to_csv_bytes(df))
+            zip_buf.seek(0)
+            filename = f"{session_id}_final_hits.zip"
+            return StreamingResponse(
+                zip_buf,
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
+    # default: JSON as before
+    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered, final_hits=final_hits)
+
 
 
 @app.post("/plot-filtered-overview", response_model=PlotOverviewResponse)
@@ -809,12 +895,13 @@ async def plot_filtered_overview(
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(...),
     data_id: str = Form(...),
-    per_motif_pvals_json: str = Form(default="")   # NEW
+    per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),  
 ):
-    chip             = chip.lower() == "true"
-    atac             = atac.lower() == "true"
-    use_hit_number   = use_hit_number.lower() == "true"
-    use_match_score  = use_match_score.lower() == "true"
+    chip            = chip.lower() == "true"
+    atac            = atac.lower() == "true"
+    use_hit_number  = use_hit_number.lower() == "true"
+    use_match_score = use_match_score.lower() == "true"
 
     try:
         peaks_df   = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_peaks.pkl"))
@@ -824,12 +911,13 @@ async def plot_filtered_overview(
         raise HTTPException(404, "No cached genomic data for given data_id")
 
     if not (chip or atac):
-        df_to_plot = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
-
+        df_to_plot = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_df_hits.pkl"))
     else:
         dfs = []
-        if chip: dfs.append(load_filtered_hits(data_id, "chip"))
-        if atac: dfs.append(load_filtered_hits(data_id, "atac"))
+        if chip:
+            dfs.append(load_filtered_hits(data_id, "chip"))
+        if atac:
+            dfs.append(load_filtered_hits(data_id, "atac"))
         df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
 
     per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
@@ -842,10 +930,10 @@ async def plot_filtered_overview(
         use_match_score=use_match_score,
         motif=chosen_motif,
         min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,    
+        per_motif_pvals=per_motif_pvals,
     )
 
-    fig, ordered_peaks = plot_occurrence_overview_plotly(
+    fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
         peak_list=list(peak_ranks.keys()),
         peaks_df=peaks_df,
         motif_list=motif_list,
@@ -854,11 +942,23 @@ async def plot_filtered_overview(
         peak_rank=peak_ranks,
         title="Motif hits",
         min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,     
+        per_motif_pvals=per_motif_pvals,
     )
 
+    # If the client asked for a file, return a CSV instead of JSON:
+    if download.lower() in ("true", "1", "csv"):
+        csv_bytes = _df_to_csv_bytes(final_hits_df)
+        filename = f"{data_id}_final_hits.csv"
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+
+    # Default: JSON as before
     fig_json = fig.to_json()
-    return {"overview_plot": fig_json, "data_id": data_id, "peak_list": ordered_peaks}
+    final_hits_records = _df_to_records_json_safe(final_hits_df)
+    return {"overview_plot": fig_json, "data_id": data_id, "peak_list": ordered_peaks, "final_hits": final_hits_records}
 
 @app.post("/plot-chip-overlay")
 async def plot_chip_overlay_json(
@@ -1299,4 +1399,3 @@ async def filter_tfs(
     tf_results = filter_tfs_from_gene_list(gene_list)
     print(tf_results)
     return {"tfs": tf_results}
-

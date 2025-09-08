@@ -1,6 +1,22 @@
-import numpy as np
-from typing import List, Dict, Tuple, Optional
+import numpy as np, io
+from typing import List, Dict, Tuple, Optional, Any
 import json
+import pandas as pd
+
+def _df_to_records_json_safe(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Convert DataFrame to a JSON-safe list[dict] (NaNs -> None)."""
+    if df is None or df.empty:
+        return []
+    # Ensure plain Python scalars (not numpy types) and replace NaN with None
+    out = df.replace({np.nan: None}).to_dict(orient="records")
+    return out
+
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    if df is None or df.empty:
+        return b""
+    buf = io.StringIO()
+    df.replace({np.nan: ""}).to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
 
 #part 0: utils
 BASE_TABLE = np.full(256, -1, dtype=np.int8)

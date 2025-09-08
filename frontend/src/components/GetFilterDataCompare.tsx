@@ -207,7 +207,7 @@ const GetFilterDataCompare: React.FC<Props> = (props) => {
       >
         {filterComplete ? "✅ Filtered!" : "🧪 Filter & Score (Batch)"}
       </button>
-
+      {/*
       {filterComplete && (
         <div className="mt-3 d-flex flex-column align-items-center gap-2">
           {processedIds.map((id) => {
@@ -223,12 +223,12 @@ const GetFilterDataCompare: React.FC<Props> = (props) => {
                 ⬇ Download Top Hits — {label}
               </a>
             );
-          })}
+          })} 
           <div className="mt-2 text-success">
             Motif hits have been filtered and scored!
           </div>
         </div>
-      )}
+      )}*/}
     </div>
   );
 };

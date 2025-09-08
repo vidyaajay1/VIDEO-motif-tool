@@ -52,9 +52,72 @@ def filter_hits_by_per_motif_pvals(
     thr = df_hits["Motif"].map(per_motif_pvals)
     mask = thr.isna() | (df_hits["p_value"].astype(float) <= thr.astype(float))
     return df_hits.loc[mask].copy()
-
-
 def rank_peaks_for_plot(
+    df_hits: pd.DataFrame,
+    gene_lfc: Dict[str, float],
+    peaks_df: pd.DataFrame,
+    use_hit_number: bool,
+    use_match_score: bool,
+    motif: Optional[str],
+    min_score_bits: float = 0.0,
+    per_motif_pvals: Optional[Dict[str, float]] = None,   # NEW
+) -> Dict[str, int]:
+    # Parse gene from Peak_ID (geneName_transcriptID)
+    gene_from_peak = peaks_df["Peak_ID"].str.split("_", n=1).str[0]
+
+    # NEW: per-motif p-value filter first
+    df_hits = filter_hits_by_per_motif_pvals(df_hits, per_motif_pvals)
+
+    if motif is None or not (use_hit_number or use_match_score):
+        fb = pd.DataFrame({"Peak_ID": peaks_df["Peak_ID"], "gene": gene_from_peak})
+        fb["metric"] = fb["gene"].map(lambda g: gene_lfc.get(g, 0.0)).clip(lower=0.0)
+        fb_sorted = fb.sort_values("metric", ascending=False, kind="mergesort")
+    else:
+        df_m = df_hits[df_hits["Motif"] == motif].copy()
+        df_m = df_m[df_m["Score_bits"] > min_score_bits]  # keep your bits gate
+
+        if df_m.empty:
+            return rank_peaks_for_plot(
+                df_hits, gene_lfc, peaks_df,
+                use_hit_number=False, use_match_score=False, motif=None
+            )
+
+        agg = {}
+        if use_hit_number:
+            agg["hit_count"] = ("Peak_ID", "size")
+        if use_match_score:
+            agg["metric"] = ("Score_bits", "sum" if use_hit_number else "max")
+
+        metrics = df_m.groupby("Peak_ID").agg(**agg)
+        if "metric" not in metrics:
+            metrics["metric"] = metrics["hit_count"]
+
+        fb = pd.DataFrame({"Peak_ID": peaks_df["Peak_ID"]})
+        fb = fb.merge(metrics[["metric"]].reset_index(), on="Peak_ID", how="left").fillna(0.0)
+        fb["gene"] = gene_from_peak.values
+        fb["metric"] = fb["metric"].clip(lower=0.0)
+        fb["fallback"] = fb["gene"].map(lambda g: abs(gene_lfc.get(g, 0.0)))
+        fb_sorted = fb.sort_values(by=["metric", "fallback"], ascending=[False, False], kind="mergesort")
+
+    # --- NEW: cluster transcripts by gene while preserving gene order by first appearance ---
+    # Determine the order of genes as they first appear in the sorted list
+    seen_genes = set()
+    gene_order = []
+    for g in fb_sorted["gene"]:
+        if g not in seen_genes:
+            seen_genes.add(g)
+            gene_order.append(g)
+
+    # For each gene (in that order), bring all its transcripts together,
+    # keeping their internal order from fb_sorted
+    clustered_ids = []
+    for g in gene_order:
+        clustered_ids.extend(fb_sorted.loc[fb_sorted["gene"] == g, "Peak_ID"].tolist())
+
+    return {pid: i + 1 for i, pid in enumerate(clustered_ids)}
+
+'''
+def rank_peaks_for_plot_TSSs_SEPARATE(
     df_hits: pd.DataFrame,
     gene_lfc: Dict[str, float],
     peaks_df: pd.DataFrame,
@@ -99,7 +162,7 @@ def rank_peaks_for_plot(
         fb["fallback"] = gene_from_peak.map(lambda g: abs(gene_lfc.get(g, 0.0)))
         fb_sorted = fb.sort_values(by=["metric", "fallback"], ascending=[False, False], kind="mergesort")
 
-    return {pid: i+1 for i, pid in enumerate(fb_sorted["Peak_ID"])}
+    return {pid: i+1 for i, pid in enumerate(fb_sorted["Peak_ID"])}'''
 
 
 # --- 4) Plotly figure builder -------------------------------------------------
@@ -124,18 +187,43 @@ def plot_occurrence_overview_plotly(
     peak_list = [str(p) for p in peak_list]
 
     motifs = _as_motif_specs(motif_list, df_hits)
+    motif_meta = {m.name: {"length": m.length, "color": m.color, "max_score": m.max_score} for m in motifs}
 
     sub_all = None
     if df_hits is not None and len(df_hits):
-        # NEW: per-motif p-value filter, then (optional) bits filter
+        # per-motif p-value filter, then optional bits filter
         hits = filter_hits_by_per_motif_pvals(df_hits, per_motif_pvals)
         if min_score_bits is not None:
             hits = hits[hits["Score_bits"] > float(min_score_bits)]
         hits["Peak_ID"] = hits["Peak_ID"].astype(str)
         sub_all = hits[hits["Peak_ID"].isin(peak_list)]
+        # also restrict to motifs actually requested
+        if "Motif" in sub_all.columns:
+            sub_all = sub_all[sub_all["Motif"].isin(motif_meta.keys())]
 
+    # NEW: Build the DataFrame of *final plotted* hits 
+    if sub_all is not None and not sub_all.empty:
+        final_hits_df = sub_all.copy()
 
-    # Build background bars for ALL peaks (even if there are no hits)
+        # computed columns used for plotting / useful downstream
+        final_hits_df["Motif_len"] = final_hits_df["Motif"].map(lambda n: motif_meta.get(n, {}).get("length", np.nan))
+        final_hits_df["Rel_pos"]   = final_hits_df["Rel_pos"].astype(float)
+        final_hits_df["Rel_end"]   = final_hits_df["Rel_pos"] + final_hits_df["Motif_len"].astype(float)
+
+        # optional: keep peak order used in the y-axis
+        order_map = {pid: i for i, pid in enumerate(peak_list)}
+        final_hits_df["Peak_order"] = final_hits_df["Peak_ID"].map(order_map)
+
+        # nice canonical sort
+        sort_cols = [c for c in ["Peak_order", "Peak_ID", "Motif", "Rel_pos", "Score_bits"] if c in final_hits_df.columns]
+        final_hits_df = final_hits_df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+    else:
+        # empty but with common columns so downstream code doesn't break
+        cols = ["Peak_ID", "Motif", "Chromosome", "Hit_start", "Hit_end", "Strand",
+                "Rel_pos", "Rel_end", "Motif_len", "Score_bits", "p_value", "Sequence"]
+        final_hits_df = pd.DataFrame(columns=cols)
+
+    # background bars for ALL peaks 
     dfp = peaks_df.copy()
     dfp["Peak_ID"] = dfp["Peak_ID"].astype(str)
 
@@ -149,7 +237,6 @@ def plot_occurrence_overview_plotly(
 
     fig = go.Figure()
 
-    # Background (no offsetgroup; keep alignmentgroup consistent)
     fig.add_bar(
         name="Peak window",
         y=df_bg["Peak_ID"], x=df_bg["length"], base=df_bg["base"], orientation="h",
@@ -165,7 +252,7 @@ def plot_occurrence_overview_plotly(
 
     # Motif bars (only for peaks that *have* hits)
     if sub_all is not None and not sub_all.empty:
-        for m in _as_motif_specs(motif_list, df_hits):
+        for m in motifs:
             sub = sub_all[sub_all["Motif"] == m.name]
             if sub.empty:
                 continue
@@ -174,25 +261,24 @@ def plot_occurrence_overview_plotly(
             base_vals = sub["Rel_pos"].astype(float).values
             y_vals    = sub["Peak_ID"].astype(str).values
 
-            chrom     = sub["Chromosome"].astype(str).values
-            start_abs = sub["Hit_start"].astype(int).values
-            end_abs   = sub["Hit_end"].astype(int).values
-            strand    = sub["Strand"].astype(str).values
-            pvals     = sub["p_value"].astype(float).values   # NEW
+            chrom     = sub["Chromosome"].astype(str).values if "Chromosome" in sub.columns else np.array([""]*len(sub))
+            start_abs = sub["Hit_start"].astype(int).values   if "Hit_start" in sub.columns else np.array([np.nan]*len(sub))
+            end_abs   = sub["Hit_end"].astype(int).values     if "Hit_end"   in sub.columns else np.array([np.nan]*len(sub))
+            strand    = sub["Strand"].astype(str).values      if "Strand"    in sub.columns else np.array([""]*len(sub))
+            seq       = sub["Sequence"]                        if "Sequence"  in sub.columns else None
+            pvals     = sub["p_value"].astype(float).values   if "p_value"   in sub.columns else np.array([np.nan]*len(sub))
 
             denom  = m.max_score if m.max_score else 1.0
             alphas = 0.3 + 0.7 * np.clip(sub["Score_bits"].astype(float).values / denom, 0, 1)
             colors = [_rgba_with_alpha(m.color, a) for a in alphas]
 
             end_vals = base_vals + x_vals
-            seq = sub["Sequence"] if "Sequence" in sub.columns else None
 
-            # NEW: include p-value in hover
             hovertemplate = (
                 "<b>%{customdata[0]}</b><br>"
                 "chr%{customdata[4]}: %{customdata[5]:,} - %{customdata[6]:,}<br>"
                 "Score: %{customdata[3]:.2f}<br>"
-                "p-value: %{customdata[9]:.2e}<br>"   # index updated below
+                "p-value: %{customdata[9]:.2e}<br>"
                 "Strand: %{customdata[7]}"
                 + ("<br>Seq: %{customdata[8]}" if seq is not None else "")
                 + "<extra></extra>"
@@ -205,9 +291,8 @@ def plot_occurrence_overview_plotly(
                 chrom, start_abs, end_abs, strand,
             ]
             if seq is not None:
-                custom_cols.append(seq.values)  # becomes index 8
-            # Append pvals as the last column (index 9 if seq present, else 8)
-            custom_cols.append(pvals)
+                custom_cols.append(seq.values)  # index 8
+            custom_cols.append(pvals)          # index 9 if seq present, else 8
             custom = np.column_stack(custom_cols)
 
             fig.add_bar(
@@ -241,11 +326,12 @@ def plot_occurrence_overview_plotly(
     fig.update_yaxes(
         type="category",
         categoryorder="array",
-        categoryarray=peak_list,   # all peaks, including no-hit ones
+        categoryarray=peak_list,
         autorange="reversed",
     )
 
-    return fig, peak_list
+    # return dataframe as well
+    return fig, peak_list, final_hits_df
 
 
 
