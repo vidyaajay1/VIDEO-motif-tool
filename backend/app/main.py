@@ -405,7 +405,7 @@ async def plot_motif_overview_compare(
     session_id: str = Form(...),
     window: int = Form(500),
     per_motif_pvals_json: str = Form(default=""),
-    download: str = Form("false"),               # ← NEW
+    download: str = Form("false"),              
     merge: str = Form("true"), 
 ):
     datasets = _load_session(session_id)
@@ -443,6 +443,7 @@ async def plot_motif_overview_compare(
             use_hit_number=False,
             use_match_score=False,
             motif=None,
+            best_transcript=False,
             min_score_bits=0.0,
             per_motif_pvals=per_motif_pvals,
         )
@@ -530,6 +531,7 @@ async def plot_motif_overview(
         use_hit_number=False,
         use_match_score=False,
         motif=None,
+        best_transcript=False,
         min_score_bits=0.0,
         per_motif_pvals=per_motif_pvals,    # NEW
     )
@@ -778,6 +780,7 @@ async def plot_filtered_overview_compare(
     use_hit_number: str = Form("false"),
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(""),
+    best_transcript: bool = Form("false"),
     per_motif_pvals_json: str = Form(default=""),
     download: str = Form("false"),               # ← NEW
     merge: str = Form("true"), 
@@ -822,7 +825,7 @@ async def plot_filtered_overview_compare(
             if chip: dfs.append(load_filtered_hits(data_id, "chip"))
             if atac: dfs.append(load_filtered_hits(data_id, "atac"))
             df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
-
+            
         peak_ranks = rank_peaks_for_plot(
             df_hits=df_to_plot,
             gene_lfc=gene_lfc,
@@ -830,6 +833,7 @@ async def plot_filtered_overview_compare(
             use_hit_number=use_hit_number,
             use_match_score=use_match_score,
             motif=(chosen_motif or None),
+            best_transcript = best_transcript,
             min_score_bits=0.0,
             per_motif_pvals=per_motif_pvals,
         )
@@ -841,7 +845,7 @@ async def plot_filtered_overview_compare(
             df_hits=df_to_plot,
             window=window,
             peak_rank=peak_ranks,
-            title=f"Motif hits — {label}",
+            title=f"Motif hits - {label}",
             min_score_bits=0.0,
             per_motif_pvals=per_motif_pvals,
         )
@@ -894,6 +898,7 @@ async def plot_filtered_overview(
     use_hit_number: str = Form("false"),
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(...),
+    best_transcript: str = Form("false"),
     data_id: str = Form(...),
     per_motif_pvals_json: str = Form(default=""),
     download: str = Form("false"),  
@@ -929,6 +934,7 @@ async def plot_filtered_overview(
         use_hit_number=use_hit_number,
         use_match_score=use_match_score,
         motif=chosen_motif,
+        best_transcript = best_transcript,
         min_score_bits=0.0,
         per_motif_pvals=per_motif_pvals,
     )

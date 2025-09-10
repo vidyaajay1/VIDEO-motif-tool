@@ -9,10 +9,12 @@ export default function MotifOccurencePlot({
   figureJson,
   onApplyFilters,
   motifList = [],
+  children,
 }: {
   figureJson?: string;
   onApplyFilters: (filters: FilterSettings) => void | Promise<void>;
   motifList?: string[];
+  children?: React.ReactNode;
 }) {
   const { fimoThreshold } = useMotifViewer();
 
@@ -34,6 +36,10 @@ export default function MotifOccurencePlot({
         fimoThreshold={fimoThreshold}
         onApply={onApplyFilters}
       />
+      {/* 👇 Download button slot: right below Generate Plot */}
+      {parsed && children ? (
+        <div className="d-flex gap-2 mt-2">{children}</div>
+      ) : null}
 
       <div className="d-flex justify-content-center">
         {parsed ? (

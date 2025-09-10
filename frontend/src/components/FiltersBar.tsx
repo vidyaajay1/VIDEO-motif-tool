@@ -9,9 +9,9 @@ export type FilterSettings = {
   sortByHits: boolean;
   sortByScore: boolean;
   selectedMotif: string;
+  bestTranscript: boolean;
   perMotifPvals: Record<string, number>;
 };
-
 type Props = {
   motifList: string[];
   fimoThreshold: string; // from context
@@ -30,6 +30,7 @@ export default function FiltersBar({
   const [sortByHits, setSortByHits] = useState(false);
   const [sortByScore, setSortByScore] = useState(false);
   const [selectedMotif, setSelectedMotif] = useState("");
+  const [bestTranscript, setBestTranscript] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [perMotifPvals, setPerMotifPvals] = useState<Record<string, string>>(
     {}
@@ -89,17 +90,20 @@ export default function FiltersBar({
     setIsLoading(true);
     try {
       const clean: Record<string, number> = {};
-      Object.entries(perMotifPvals).forEach(([k, v]) => {
-        if (!v) return;
+      for (const [k, v] of Object.entries(perMotifPvals)) {
+        if (!v) continue;
         const num = Number(v);
         if (!Number.isNaN(num) && num >= 0) clean[k] = num;
-      });
+      }
+      const canBest = Boolean(selectedMotif) && (sortByHits || sortByScore);
+
       await onApply({
         openChromatin,
         bindingPeaks,
         sortByHits,
         sortByScore,
         selectedMotif,
+        bestTranscript: canBest ? bestTranscript : false,
         perMotifPvals: clean,
       });
     } finally {
@@ -157,12 +161,20 @@ export default function FiltersBar({
                   onChange={(e) => setSortByHits(e.target.checked)}
                 />
               </Form.Group>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-2">
                 <Form.Check
                   type="checkbox"
                   label="Motif match score"
                   checked={sortByScore}
                   onChange={(e) => setSortByScore(e.target.checked)}
+                />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Check
+                  type="checkbox"
+                  label="Show only best-scoring transcript"
+                  checked={bestTranscript}
+                  onChange={(e) => setBestTranscript(e.target.checked)}
                 />
               </Form.Group>
             </>

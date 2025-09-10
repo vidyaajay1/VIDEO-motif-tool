@@ -52,6 +52,7 @@ def filter_hits_by_per_motif_pvals(
     thr = df_hits["Motif"].map(per_motif_pvals)
     mask = thr.isna() | (df_hits["p_value"].astype(float) <= thr.astype(float))
     return df_hits.loc[mask].copy()
+
 def rank_peaks_for_plot(
     df_hits: pd.DataFrame,
     gene_lfc: Dict[str, float],
@@ -59,13 +60,15 @@ def rank_peaks_for_plot(
     use_hit_number: bool,
     use_match_score: bool,
     motif: Optional[str],
+    best_transcript: bool,  #display only the transcript with the best hits for that motif
     min_score_bits: float = 0.0,
-    per_motif_pvals: Optional[Dict[str, float]] = None,   # NEW
+    per_motif_pvals: Optional[Dict[str, float]] = None, 
 ) -> Dict[str, int]:
+    
+    print("best_transcript from plotting.py:", best_transcript)
     # Parse gene from Peak_ID (geneName_transcriptID)
     gene_from_peak = peaks_df["Peak_ID"].str.split("_", n=1).str[0]
 
-    # NEW: per-motif p-value filter first
     df_hits = filter_hits_by_per_motif_pvals(df_hits, per_motif_pvals)
 
     if motif is None or not (use_hit_number or use_match_score):
@@ -74,7 +77,7 @@ def rank_peaks_for_plot(
         fb_sorted = fb.sort_values("metric", ascending=False, kind="mergesort")
     else:
         df_m = df_hits[df_hits["Motif"] == motif].copy()
-        df_m = df_m[df_m["Score_bits"] > min_score_bits]  # keep your bits gate
+        df_m = df_m[df_m["Score_bits"] > min_score_bits]  
 
         if df_m.empty:
             return rank_peaks_for_plot(
@@ -96,11 +99,11 @@ def rank_peaks_for_plot(
         fb = fb.merge(metrics[["metric"]].reset_index(), on="Peak_ID", how="left").fillna(0.0)
         fb["gene"] = gene_from_peak.values
         fb["metric"] = fb["metric"].clip(lower=0.0)
+        # fallback keeps gene order consistent if metrics tie / are zero
         fb["fallback"] = fb["gene"].map(lambda g: abs(gene_lfc.get(g, 0.0)))
         fb_sorted = fb.sort_values(by=["metric", "fallback"], ascending=[False, False], kind="mergesort")
 
-    # --- NEW: cluster transcripts by gene while preserving gene order by first appearance ---
-    # Determine the order of genes as they first appear in the sorted list
+    # determine the order of genes as they first appear in the sorted list
     seen_genes = set()
     gene_order = []
     for g in fb_sorted["gene"]:
@@ -108,12 +111,18 @@ def rank_peaks_for_plot(
             seen_genes.add(g)
             gene_order.append(g)
 
-    # For each gene (in that order), bring all its transcripts together,
-    # keeping their internal order from fb_sorted
+    if best_transcript:
+        #keep only the top transcript for each gene.
+        top_ids = []
+        for g in gene_order:
+            # first occurrence in fb_sorted is the best for that gene due to the stable sort
+            top_ids.append(fb_sorted.loc[fb_sorted["gene"] == g, "Peak_ID"].iloc[0])
+        return {pid: i + 1 for i, pid in enumerate(top_ids)}
+
+    # otherwise cluster all the transcripts together
     clustered_ids = []
     for g in gene_order:
         clustered_ids.extend(fb_sorted.loc[fb_sorted["gene"] == g, "Peak_ID"].tolist())
-
     return {pid: i + 1 for i, pid in enumerate(clustered_ids)}
 
 '''

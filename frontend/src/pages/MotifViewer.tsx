@@ -19,8 +19,44 @@ import CompareInputs from "../components/CompareInputs";
 import MotifOccurrenceCompare from "../components/MotifOccurrenceCompare";
 import type { FilterSettings } from "../types/FilterSettings";
 import FiltersBar from "../components/FiltersBar";
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 
+// ---------- Small helpers ----------
+const DEFAULT_FILTERS: FilterSettings = {
+  openChromatin: false,
+  bindingPeaks: false,
+  sortByHits: false,
+  sortByScore: false,
+  selectedMotif: "",
+  bestTranscript: false,
+  perMotifPvals: {},
+};
+
+const ENDPOINTS = {
+  validateSingle: (base: string) => `${base}/validate-motifs`,
+  validateCompare: (base: string) => `${base}/validate-motifs-group`,
+  overviewSingle: (base: string) => `${base}/plot-motif-overview`,
+  overviewCompare: (base: string) => `${base}/plot-motif-overview-compare`,
+  filteredSingle: (base: string) => `${base}/plot-filtered-overview`,
+  filteredCompare: (base: string) => `${base}/plot-filtered-overview-compare`,
+  getGenomicSingle: (base: string) => `${base}/get-genomic-input`,
+  getGenomicCompare: (base: string) => `${base}/get-genomic-input-compare`,
+  getHitsBatch: (base: string) => `${base}/get-motif-hits-batch`,
+};
+
+async function postJSON(url: string, fd: FormData) {
+  const res = await fetch(url, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+async function postBlob(url: string, fd: FormData) {
+  const res = await fetch(url, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(await res.text());
+  return res.blob();
+}
+
+type Step = 0 | 1 | 2 | 3 | 4 | 5;
 const steps = [
   "Genomic Input",
   "Enter Motifs",
@@ -30,7 +66,6 @@ const steps = [
   "Track Overlay",
 ];
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5;
 function MotifViewer() {
   const [lastFilters, setLastFilters] = useState<FilterSettings | null>(null);
   const [compareMode, setCompareMode] = useState(false);
@@ -39,6 +74,7 @@ function MotifViewer() {
   const [labelB, setLabelB] = useState("List B");
   const [geneListFileA, setGeneListFileA] = useState<File | null>(null);
   const [geneListFileB, setGeneListFileB] = useState<File | null>(null);
+
   const [activeStep, setActiveStep] = useState<Step>(() => {
     const saved = sessionStorage.getItem("motifViewer.activeStep");
     return saved !== null ? (parseInt(saved, 10) as Step) : 0;
@@ -46,14 +82,7 @@ function MotifViewer() {
   const goNext = () =>
     setActiveStep((s) => Math.min(steps.length - 1, s + 1) as Step);
   const goBack = () => setActiveStep((s) => Math.max(0, s - 1) as Step);
-  const defaultFilters: FilterSettings = {
-    openChromatin: false,
-    bindingPeaks: false,
-    sortByHits: false,
-    sortByScore: false,
-    selectedMotif: "",
-    perMotifPvals: {},
-  };
+
   const {
     dataType,
     setDataType,
@@ -74,10 +103,10 @@ function MotifViewer() {
     fimoThreshold,
     labelsByDataId,
     setLabelsByDataId,
-    fetchJSON,
+    fetchJSON, // keeping for components that expect it
   } = useMotifViewer();
 
-  // NEW: local state to hold Plotly JSON strings
+  // Figures
   const [overviewFigureJson, setOverviewFigureJson] = useState<string | null>(
     null
   );
@@ -91,21 +120,25 @@ function MotifViewer() {
     Record<string, string>
   >({});
 
+  // Ordered peaks (used by overlay compare)
   type OrderedPeaksByLabel = Record<string, string[]>;
-
   const [orderedPeaksByLabel, setOrderedPeaksByLabel] =
     useState<OrderedPeaksByLabel>({});
 
+  // Persist a scan version (used by children props)
   const [scanVersion, setScanVersion] = useState<number>(() => {
     const saved = sessionStorage.getItem("motifViewer.scanVersion");
     return saved !== null ? parseInt(saved, 10) : 0;
   });
+
   useEffect(() => {
     sessionStorage.setItem("motifViewer.activeStep", String(activeStep));
   }, [activeStep]);
   useEffect(() => {
     sessionStorage.setItem("motifViewer.scanVersion", String(scanVersion));
   }, [scanVersion]);
+
+  // Motif CRUD
   const updateMotif = (i: number, p: Partial<(typeof motifs)[0]>) =>
     setMotifs((ms) => ms.map((m, idx) => (idx === i ? { ...m, ...p } : m)));
 
@@ -129,10 +162,10 @@ function MotifViewer() {
   const removeMotif = (i: number) =>
     setMotifs((ms) => ms.filter((_, idx) => idx !== i));
 
+  // Genomic input (single/compare)
   const handleGetGenomicInputCompare = async () => {
     if (!geneListFileA || !geneListFileB)
       return alert("Upload both gene lists (A & B)");
-
     const fd = new FormData();
     fd.append("gene_list_file_a", geneListFileA);
     fd.append("gene_list_file_b", geneListFileB);
@@ -140,20 +173,14 @@ function MotifViewer() {
     fd.append("label_b", labelB);
     fd.append("window_size", String(inputWindow));
 
-    const json = await fetchJSON(
-      `${API_BASE}/get-genomic-input-compare`,
-      { method: "POST", body: fd },
-      alert
-    );
-    if (json) {
-      // { session_id, datasets: [{data_id,label,peak_list}, ...] }
+    try {
+      const json = await postJSON(ENDPOINTS.getGenomicCompare(API_BASE), fd);
       setSessionId(json.session_id);
-      // for convenience you can retain the first data_id for components that still need one
       setDataId(json.datasets[0]?.data_id ?? null);
       setPeakList(json.datasets[0]?.peak_list ?? []);
       setScanComplete(false);
       const mapping: Record<string, string> = {};
-      json.datasets.forEach((ds: any) => {
+      (json.datasets || []).forEach((ds: any) => {
         mapping[ds.data_id] = ds.label;
       });
       setLabelsByDataId(mapping);
@@ -162,117 +189,8 @@ function MotifViewer() {
       setFilteredOverviewFigureJson(null);
       setOverviewFiguresByLabel({});
       setFilteredFiguresByLabel({});
-    }
-  };
-
-  // process motifs
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [validatedMotifs, setValidatedMotifs] = useState<typeof motifs>([]);
-  const [processedSuccess, setProcessedSuccess] = useState(false);
-  const [isProcessingMotifs, setIsProcessingMotifs] = useState(false);
-
-  const handleProcessMotifs = async (): Promise<void> => {
-    setProcessedSuccess(false);
-    setValidationError(null);
-    setIsProcessingMotifs(true);
-
-    const fd = new FormData();
-    motifs.forEach((m) => {
-      const payload: Record<string, any> = {
-        name: m.name,
-        color: m.color,
-        type: m.type,
-      };
-      if (m.type === "pwm") payload.pwm = m.pwm;
-      else if (m.type === "pcm") payload.pcm = m.pcm;
-      else payload.iupac = m.iupac;
-      fd.append("motifs", JSON.stringify(payload));
-    });
-
-    try {
-      if (compareMode) {
-        if (!sessionId) return alert("Missing session_id");
-        fd.append("session_id", sessionId);
-        await fetchJSON(
-          `${API_BASE}/validate-motifs-group`,
-          { method: "POST", body: fd },
-          setValidationError
-        );
-      } else {
-        if (!dataId) return alert("Missing data_id");
-        fd.append("data_id", dataId);
-        await fetchJSON(
-          `${API_BASE}/validate-motifs`,
-          { method: "POST", body: fd },
-          setValidationError
-        );
-      }
-      setValidatedMotifs([...motifs]);
-      setProcessedSuccess(true);
-    } catch (err: any) {
-      setValidationError("Network error: " + err.message);
-    } finally {
-      setIsProcessingMotifs(false);
-    }
-  };
-
-  // Build the *initial* overview (unfiltered). Now reads overview_plot
-  const handleMotifOverview = async () => {
-    if (compareMode) {
-      if (!sessionId) return alert("Missing session_id");
-
-      const fd = new FormData();
-      fd.append("session_id", sessionId);
-      fd.append("window", String(inputWindow));
-      // optional thresholds can be added later:
-      // fd.append("per_motif_pvals_json", JSON.stringify({}));
-
-      const json = await fetchJSON(
-        `${API_BASE}/plot-motif-overview-compare`,
-        { method: "POST", body: fd },
-        alert
-      );
-
-      if (json) {
-        setOverviewFiguresByLabel(json.figures || {});
-        setFilteredFiguresByLabel({});
-
-        // json.ordered_peaks is { [label]: string[] }
-        const map: OrderedPeaksByLabel = {};
-        if (json.ordered_peaks && typeof json.ordered_peaks === "object") {
-          for (const [label, arr] of Object.entries(json.ordered_peaks)) {
-            map[label] = Array.isArray(arr) ? arr.map(String) : [];
-          }
-        }
-        setOrderedPeaksByLabel(map);
-      }
-      return;
-    }
-
-    // --- existing single-list path ---
-    if (!dataId) return alert("Missing data_id");
-    const fd = new FormData();
-    motifs.forEach((m) => {
-      const payload = {
-        type: m.type,
-        data: m.type === "iupac" ? m.iupac : m.type === "pwm" ? m.pwm : m.pcm,
-        name: m.name,
-        color: m.color,
-      };
-      fd.append("motifs", JSON.stringify(payload));
-    });
-    fd.append("window", String(inputWindow));
-    fd.append("data_id", dataId);
-
-    const json = await fetchJSON(
-      `${API_BASE}/plot-motif-overview`,
-      { method: "POST", body: fd },
-      alert
-    );
-    if (json) {
-      setOverviewFigureJson(json.overview_plot ?? null);
-      setFilteredOverviewFigureJson(null);
-      setLastFilters((prev) => prev ?? defaultFilters);
+    } catch (e: any) {
+      alert(e.message || String(e));
     }
   };
 
@@ -286,128 +204,134 @@ function MotifViewer() {
     if (dataType === "genes") fd.append("gene_list_file", geneListFile!);
     fd.append("window_size", String(inputWindow));
 
-    const json = await fetchJSON(
-      `${API_BASE}/get-genomic-input`,
-      { method: "POST", body: fd },
-      alert
-    );
-    if (json) {
+    try {
+      const json = await postJSON(ENDPOINTS.getGenomicSingle(API_BASE), fd);
       setDataId(json.data_id);
       setPeakList(json.peak_list);
       setScanComplete(false);
       setOverviewFigureJson(null);
       setFilteredOverviewFigureJson(null);
+    } catch (e: any) {
+      alert(e.message || String(e));
     }
   };
 
+  // Motif validation
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validatedMotifs, setValidatedMotifs] = useState<typeof motifs>([]);
+  const [processedSuccess, setProcessedSuccess] = useState(false);
+  const [isProcessingMotifs, setIsProcessingMotifs] = useState(false);
+
+  function appendMotifsToForm(fd: FormData) {
+    motifs.forEach((m) => {
+      const payload: Record<string, any> = {
+        name: m.name,
+        color: m.color,
+        type: m.type,
+      };
+      if (m.type === "pwm") payload.pwm = m.pwm;
+      else if (m.type === "pcm") payload.pcm = m.pcm;
+      else payload.iupac = m.iupac;
+      fd.append("motifs", JSON.stringify(payload));
+    });
+  }
+
+  const handleProcessMotifs = async (): Promise<void> => {
+    setProcessedSuccess(false);
+    setValidationError(null);
+    setIsProcessingMotifs(true);
+    const fd = new FormData();
+    appendMotifsToForm(fd);
+    try {
+      if (compareMode) {
+        if (!sessionId) throw new Error("Missing session_id");
+        fd.append("session_id", sessionId);
+        await postJSON(ENDPOINTS.validateCompare(API_BASE), fd);
+      } else {
+        if (!dataId) throw new Error("Missing data_id");
+        fd.append("data_id", dataId);
+        await postJSON(ENDPOINTS.validateSingle(API_BASE), fd);
+      }
+      setValidatedMotifs([...motifs]);
+      setProcessedSuccess(true);
+    } catch (err: any) {
+      setValidationError(err.message || "Network error");
+    } finally {
+      setIsProcessingMotifs(false);
+    }
+  };
+
+  // Overview (unfiltered)
+  const handleMotifOverview = async () => {
+    try {
+      if (compareMode) {
+        if (!sessionId) throw new Error("Missing session_id");
+        const fd = new FormData();
+        fd.append("session_id", sessionId);
+        fd.append("window", String(inputWindow));
+        const json = await postJSON(ENDPOINTS.overviewCompare(API_BASE), fd);
+        setOverviewFiguresByLabel(json.figures || {});
+        setFilteredFiguresByLabel({});
+        const map: OrderedPeaksByLabel = {};
+        if (json.ordered_peaks && typeof json.ordered_peaks === "object") {
+          for (const [label, arr] of Object.entries(json.ordered_peaks)) {
+            map[label] = Array.isArray(arr) ? arr.map(String) : [];
+          }
+        }
+        setOrderedPeaksByLabel(map);
+        return;
+      }
+      // single
+      if (!dataId) throw new Error("Missing data_id");
+      const fd = new FormData();
+      appendMotifsToForm(fd);
+      fd.append("window", String(inputWindow));
+      fd.append("data_id", dataId);
+      const json = await postJSON(ENDPOINTS.overviewSingle(API_BASE), fd);
+      setOverviewFigureJson(json.overview_plot ?? null);
+      setFilteredOverviewFigureJson(null);
+      setLastFilters((prev) => prev ?? DEFAULT_FILTERS);
+    } catch (e: any) {
+      alert(e.message || String(e));
+    }
+  };
+
+  // After scan is finished
   const onFinishedScan = async () => {
     setScanComplete(true);
-
-    if (compareMode) {
-      if (!sessionId) return alert("Missing session_id");
-      const fd = new FormData();
-      fd.append("session_id", sessionId);
-      fd.append("window", String(inputWindow));
-      fd.append("fimo_threshold", "0.005");
-
-      const ok = await fetchJSON(
-        `${API_BASE}/get-motif-hits-batch`,
-        { method: "POST", body: fd },
-        alert
-      );
-      if (!ok) return;
-      await handleMotifOverview(); // builds both figures
-      setScanVersion((v) => v + 1);
-      return;
-    }
-
-    // single
-    await handleMotifOverview();
-    setScanVersion((v) => v + 1);
-  };
-
-  const fetchFilteredPlot = async (filters: FilterSettings) => {
-    setLastFilters(filters);
-    const {
-      openChromatin,
-      bindingPeaks,
-      sortByHits,
-      sortByScore,
-      selectedMotif,
-    } = filters;
-
-    if (compareMode) {
-      if (!sessionId) return alert("Missing session_id");
-
-      const fd = new FormData();
-      fd.append("session_id", sessionId);
-      fd.append("window", String(inputWindow));
-      fd.append("chip", String(bindingPeaks)); // "true"/"false"
-      fd.append("atac", String(openChromatin)); // "true"/"false"
-      fd.append("use_hit_number", String(sortByHits));
-      fd.append("use_match_score", String(sortByScore));
-      fd.append("chosen_motif", selectedMotif || "");
-      fd.append(
-        "per_motif_pvals_json",
-        JSON.stringify(filters.perMotifPvals || {})
-      );
-
-      const json = await fetchJSON(
-        `${API_BASE}/plot-filtered-overview-compare`,
-        { method: "POST", body: fd },
-        alert
-      );
-      if (json) {
-        setFilteredFiguresByLabel(json.figures || {}); // <- renders filtered plots
+    try {
+      if (compareMode) {
+        if (!sessionId) throw new Error("Missing session_id");
+        const fd = new FormData();
+        fd.append("session_id", sessionId);
+        fd.append("window", String(inputWindow));
+        fd.append("fimo_threshold", "0.005");
+        await postJSON(ENDPOINTS.getHitsBatch(API_BASE), fd);
       }
-      return;
+      await handleMotifOverview();
+      setScanVersion((v) => v + 1);
+    } catch (e: any) {
+      alert(e.message || String(e));
     }
-
-    if (!dataId) return alert("Missing data_id");
-
-    const fd = new FormData();
-    fd.append("data_id", dataId);
-    fd.append("window", String(inputWindow));
-    fd.append("chip", String(bindingPeaks));
-    fd.append("atac", String(openChromatin));
-    fd.append("use_hit_number", String(sortByHits));
-    fd.append("use_match_score", String(sortByScore));
-    fd.append("chosen_motif", selectedMotif);
-    fd.append(
-      "per_motif_pvals_json",
-      JSON.stringify(filters.perMotifPvals || {})
-    );
-
-    const res = await fetch(`${API_BASE}/plot-filtered-overview`, {
-      method: "POST",
-      body: fd,
-    });
-    if (!res.ok) return alert(await res.text());
-
-    const json = await res.json();
-    // Backend should return { overview_plot, data_id, peak_list } now
-    setFilteredOverviewFigureJson(json.overview_plot ?? null);
   };
 
-  const validatedMotifNames = validatedMotifs
-    .map((m) => m.name)
-    .filter(Boolean);
+  // Build filters → FormData (reused)
   function buildFormDataFromFilters(
     filters: FilterSettings,
     isCompare: boolean
   ): FormData {
     const fd = new FormData();
     fd.append("window", String(inputWindow));
-    fd.append("chip", String(filters.bindingPeaks));
-    fd.append("atac", String(filters.openChromatin));
-    fd.append("use_hit_number", String(filters.sortByHits));
-    fd.append("use_match_score", String(filters.sortByScore));
+    fd.append("chip", String(!!filters.bindingPeaks));
+    fd.append("atac", String(!!filters.openChromatin));
+    fd.append("use_hit_number", String(!!filters.sortByHits));
+    fd.append("use_match_score", String(!!filters.sortByScore));
     fd.append("chosen_motif", filters.selectedMotif || "");
+    fd.append("best_transcript", String(!!filters.bestTranscript));
     fd.append(
       "per_motif_pvals_json",
       JSON.stringify(filters.perMotifPvals || {})
     );
-
     if (isCompare) {
       if (!sessionId) throw new Error("Missing session_id");
       fd.append("session_id", sessionId);
@@ -418,22 +342,51 @@ function MotifViewer() {
     return fd;
   }
 
-  async function downloadCurrentSingle() {
+  // Filtered plot (single/compare unified)
+  const fetchFilteredPlot = async (filters: FilterSettings) => {
+    setLastFilters(filters);
+    const isCompare = compareMode;
+    try {
+      const fd = buildFormDataFromFilters(filters, isCompare);
+      const json = await postJSON(
+        isCompare
+          ? ENDPOINTS.filteredCompare(API_BASE)
+          : ENDPOINTS.filteredSingle(API_BASE),
+        fd
+      );
+      if (isCompare) {
+        setFilteredFiguresByLabel(json.figures || {});
+      } else {
+        setFilteredOverviewFigureJson(json.overview_plot ?? null);
+      }
+    } catch (e: any) {
+      alert(e.message || String(e));
+    }
+  };
+
+  // Downloads (single/compare unified)
+  async function downloadFiltered(merge?: boolean) {
     if (!lastFilters)
       return alert("Apply filters at least once before downloading.");
+    const isCompare = compareMode;
     try {
-      const fd = buildFormDataFromFilters(lastFilters, false);
+      const fd = buildFormDataFromFilters(lastFilters, isCompare);
       fd.set("download", "true");
-      const res = await fetch(`${API_BASE}/plot-filtered-overview`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) return alert(await res.text());
-      const blob = await res.blob();
+      if (isCompare) fd.set("merge", String(!!merge));
+      const blob = await postBlob(
+        isCompare
+          ? ENDPOINTS.filteredCompare(API_BASE)
+          : ENDPOINTS.filteredSingle(API_BASE),
+        fd
+      );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${dataId ?? "motif_hits"}.csv`;
+      a.download = isCompare
+        ? merge
+          ? `${sessionId ?? "motif_hits"}_merged.csv`
+          : `${sessionId ?? "motif_hits"}.zip`
+        : `${dataId ?? "motif_hits"}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
@@ -441,31 +394,11 @@ function MotifViewer() {
     }
   }
 
-  async function downloadCurrentCompare(merge: boolean) {
-    if (!lastFilters)
-      return alert("Apply filters at least once before downloading.");
-    try {
-      const fd = buildFormDataFromFilters(lastFilters, true);
-      fd.set("download", "true");
-      fd.set("merge", String(merge));
-      const res = await fetch(`${API_BASE}/plot-filtered-overview-compare`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) return alert(await res.text());
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = merge
-        ? `${sessionId ?? "motif_hits"}_merged.csv`
-        : `${sessionId ?? "motif_hits"}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert(e.message || String(e));
-    }
-  }
+  const validatedMotifNames = validatedMotifs
+    .map((m) => m.name)
+    .filter(Boolean);
+
+  // ---------- Render ----------
   return (
     <div className="container-xxl">
       <Container className="my-4">
@@ -513,7 +446,7 @@ function MotifViewer() {
                 />
 
                 <GenomicInput
-                  compareMode={compareMode} // NEW: pass compareMode down
+                  compareMode={compareMode}
                   dataType={dataType}
                   setDataType={setDataType}
                   bedFile={bedFile}
@@ -526,7 +459,6 @@ function MotifViewer() {
                     if (compareMode) await handleGetGenomicInputCompare();
                     else await handleGetGenomicInput();
                   }}
-                  // Optional simple guard so users don’t click “Process” too soon
                   canProcess={
                     compareMode
                       ? Boolean(
@@ -545,13 +477,14 @@ function MotifViewer() {
                 <h4 className="text-center mb-3 mt-3">
                   Set up motif input{" "}
                   <InfoTip
-                    text="Enter all the motifs you're interested in. 
-          You can input IUPAC consensus sequences, Position Weight/Frequency Matrices (PWM/PFM) or Position Count Matrices.
-          Enter a name and choose a color for each motif."
+                    text={`Enter all the motifs you're interested in. 
+You can input IUPAC consensus sequences, PWM/PFM or Position Count Matrices.
+Enter a name and choose a color for each motif.`}
                     placement="right"
-                    id="genomic-input-info"
+                    id="motif-input-info"
                   />
                 </h4>
+
                 {motifs.length === 0 && (
                   <div className="alert alert-warning">
                     Please add at least one motif to proceed!
@@ -574,6 +507,7 @@ function MotifViewer() {
                 >
                   + Add Motif
                 </Button>
+
                 <div>
                   <Button
                     variant="primary mt-3"
@@ -614,7 +548,6 @@ function MotifViewer() {
 
             {activeStep === 2 && (
               <ScanFIMO
-                // existing
                 dataId={dataId}
                 inputWindow={inputWindow}
                 validMotifs={validatedMotifs}
@@ -627,7 +560,6 @@ function MotifViewer() {
                   onFinishedScan();
                   goNext();
                 }}
-                // NEW
                 compareMode={compareMode}
                 sessionId={sessionId}
               />
@@ -639,11 +571,7 @@ function MotifViewer() {
                   sessionId={sessionId!}
                   scanComplete={scanComplete}
                   scanVersion={scanVersion}
-                  onDone={() => {
-                    // You can trigger a re-plot here or just advance.
-                    // The step 4 UI lets users generate filtered plots as needed.
-                    //goNext();
-                  }}
+                  onDone={() => {}}
                   onError={alert}
                 />
               ) : (
@@ -652,9 +580,7 @@ function MotifViewer() {
                   scanComplete={scanComplete}
                   scanVersion={scanVersion}
                   onFilteredOverview={(figureJson: string | null) => {
-                    // (Single mode) You were previously using this to advance; keep it.
                     setFilteredOverviewFigureJson(figureJson);
-                    //goNext();
                   }}
                   onError={alert}
                 />
@@ -674,42 +600,30 @@ function MotifViewer() {
                           sortByHits: f.sortByHits,
                           sortByScore: f.sortByScore,
                           selectedMotif: f.selectedMotif,
+                          bestTranscript: f.bestTranscript,
                           perMotifPvals: f.perMotifPvals,
                         })
                       }
                       applyLabel="📊 Generate Plots"
-                    />{" "}
-                    <div className="d-flex gap-2 mb-2 mt-3">
-                      {compareMode ? (
-                        <>
-                          <Button
-                            variant="outline-success"
-                            size="sm"
-                            disabled={!sessionId}
-                            onClick={() => downloadCurrentCompare(true)}
-                          >
-                            ⬇️ Download hits (merged CSV)
-                          </Button>
-                          <Button
-                            variant="outline-secondary"
-                            size="sm"
-                            disabled={!sessionId}
-                            onClick={() => downloadCurrentCompare(false)}
-                          >
-                            Download hits (per-dataset ZIP)
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          variant="outline-success"
-                          size="sm"
-                          disabled={!dataId || !lastFilters}
-                          onClick={downloadCurrentSingle}
-                        >
-                          Download hits (CSV)
-                        </Button>
-                      )}
-                    </div>
+                    />
+                    <>
+                      <Button
+                        variant="outline-success"
+                        size="sm"
+                        disabled={!sessionId || !lastFilters}
+                        onClick={() => downloadFiltered(true)}
+                      >
+                        Download hits (merged CSV)
+                      </Button>
+                      <Button
+                        variant="outline-secondary"
+                        size="sm"
+                        disabled={!sessionId || !lastFilters}
+                        onClick={() => downloadFiltered(false)}
+                      >
+                        Download hits (per-dataset ZIP)
+                      </Button>
+                    </>
                     <MotifOccurrenceCompare
                       figuresByLabel={
                         Object.keys(filteredFiguresByLabel).length
@@ -727,7 +641,16 @@ function MotifViewer() {
                     }
                     onApplyFilters={fetchFilteredPlot}
                     motifList={validatedMotifNames}
-                  />
+                  >
+                    <Button
+                      variant="outline-success"
+                      size="sm"
+                      disabled={!dataId || !lastFilters}
+                      onClick={() => downloadFiltered()}
+                    >
+                      Download hits (CSV)
+                    </Button>
+                  </MotifOccurencePlot>
                 )}
               </>
             )}

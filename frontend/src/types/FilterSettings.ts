@@ -4,5 +4,6 @@ export type FilterSettings = {
   sortByHits: boolean;
   sortByScore: boolean;
   selectedMotif: string;
+  bestTranscript:boolean;
   perMotifPvals: Record<string, number>;
 };
