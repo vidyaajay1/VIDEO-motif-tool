@@ -307,7 +307,7 @@ def plot_occurrence_overview_plotly(
             fig.add_bar(
                 name=m.name,
                 y=y_vals, x=x_vals, base=base_vals, orientation="h",
-                marker=dict(color=colors, line=dict(color="black", width=0.4)),
+                marker=dict(color=colors, line=dict(color="grey", width=0.4)),
                 hovertemplate=hovertemplate, customdata=custom,
                 alignmentgroup="peaks", width=0.8,
             )
