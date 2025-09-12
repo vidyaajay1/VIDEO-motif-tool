@@ -205,7 +205,7 @@ const GetFilterDataCompare: React.FC<Props> = (props) => {
         onClick={handleSubmit}
         disabled={!scanComplete || !canSubmit}
       >
-        {filterComplete ? "✅ Filtered!" : "🧪 Filter & Score (Batch)"}
+        {filterComplete ? "Filtered!" : "Filter & Score (Batch)"}
       </button>
       {/*
       {filterComplete && (

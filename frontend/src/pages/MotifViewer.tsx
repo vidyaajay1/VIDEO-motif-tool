@@ -68,12 +68,6 @@ const steps = [
 
 function MotifViewer() {
   const [lastFilters, setLastFilters] = useState<FilterSettings | null>(null);
-  const [compareMode, setCompareMode] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [labelA, setLabelA] = useState("List A");
-  const [labelB, setLabelB] = useState("List B");
-  const [geneListFileA, setGeneListFileA] = useState<File | null>(null);
-  const [geneListFileB, setGeneListFileB] = useState<File | null>(null);
 
   const [activeStep, setActiveStep] = useState<Step>(() => {
     const saved = sessionStorage.getItem("motifViewer.activeStep");
@@ -84,6 +78,7 @@ function MotifViewer() {
   const goBack = () => setActiveStep((s) => Math.max(0, s - 1) as Step);
 
   const {
+    // core input controls
     dataType,
     setDataType,
     bedFile,
@@ -96,14 +91,38 @@ function MotifViewer() {
     setDataId,
     peakList,
     setPeakList,
+
+    // motifs
     motifs,
     setMotifs,
+
+    // scan state
     scanComplete,
     setScanComplete,
+
+    // compare context
+    isCompare,
+    setIsCompare,
+    labelA,
+    setLabelA,
+    labelB,
+    setLabelB,
+    geneListFileA,
+    setGeneListFileA,
+    geneListFileB,
+    setGeneListFileB,
+    dataIdA,
+    setDataIdA,
+    dataIdB,
+    setDataIdB,
+    sessionId,
+    setSessionId,
+
+    // shared
     fimoThreshold,
     labelsByDataId,
     setLabelsByDataId,
-    fetchJSON, // keeping for components that expect it
+    fetchJSON,
   } = useMotifViewer();
 
   // Figures
@@ -176,14 +195,31 @@ function MotifViewer() {
     try {
       const json = await postJSON(ENDPOINTS.getGenomicCompare(API_BASE), fd);
       setSessionId(json.session_id);
-      setDataId(json.datasets[0]?.data_id ?? null);
-      setPeakList(json.datasets[0]?.peak_list ?? []);
+
+      // If API returns label-tagged datasets, prefer that; otherwise assume [0]=A,[1]=B
+      const dsA =
+        (json.datasets || []).find((d: any) => d.label === labelA) ??
+        json.datasets?.[0];
+      const dsB =
+        (json.datasets || []).find((d: any) => d.label === labelB) ??
+        json.datasets?.[1];
+
+      setDataIdA(dsA?.data_id ?? null);
+      setDataIdB(dsB?.data_id ?? null);
+
+      // Maintain legacy single defaults to the A-side for components still expecting them
+      setDataId(dsA?.data_id ?? null);
+      setPeakList(Array.isArray(dsA?.peak_list) ? dsA.peak_list : []);
+
       setScanComplete(false);
+
+      // map data_id -> label for downstream plots
       const mapping: Record<string, string> = {};
       (json.datasets || []).forEach((ds: any) => {
-        mapping[ds.data_id] = ds.label;
+        if (ds?.data_id && ds?.label) mapping[ds.data_id] = ds.label;
       });
       setLabelsByDataId(mapping);
+
       // clear plots
       setOverviewFigureJson(null);
       setFilteredOverviewFigureJson(null);
@@ -243,7 +279,7 @@ function MotifViewer() {
     const fd = new FormData();
     appendMotifsToForm(fd);
     try {
-      if (compareMode) {
+      if (isCompare) {
         if (!sessionId) throw new Error("Missing session_id");
         fd.append("session_id", sessionId);
         await postJSON(ENDPOINTS.validateCompare(API_BASE), fd);
@@ -264,7 +300,7 @@ function MotifViewer() {
   // Overview (unfiltered)
   const handleMotifOverview = async () => {
     try {
-      if (compareMode) {
+      if (isCompare) {
         if (!sessionId) throw new Error("Missing session_id");
         const fd = new FormData();
         fd.append("session_id", sessionId);
@@ -300,7 +336,7 @@ function MotifViewer() {
   const onFinishedScan = async () => {
     setScanComplete(true);
     try {
-      if (compareMode) {
+      if (isCompare) {
         if (!sessionId) throw new Error("Missing session_id");
         const fd = new FormData();
         fd.append("session_id", sessionId);
@@ -318,7 +354,7 @@ function MotifViewer() {
   // Build filters → FormData (reused)
   function buildFormDataFromFilters(
     filters: FilterSettings,
-    isCompare: boolean
+    inCompare: boolean
   ): FormData {
     const fd = new FormData();
     fd.append("window", String(inputWindow));
@@ -332,7 +368,7 @@ function MotifViewer() {
       "per_motif_pvals_json",
       JSON.stringify(filters.perMotifPvals || {})
     );
-    if (isCompare) {
+    if (inCompare) {
       if (!sessionId) throw new Error("Missing session_id");
       fd.append("session_id", sessionId);
     } else {
@@ -345,16 +381,16 @@ function MotifViewer() {
   // Filtered plot (single/compare unified)
   const fetchFilteredPlot = async (filters: FilterSettings) => {
     setLastFilters(filters);
-    const isCompare = compareMode;
+    const inCompare = isCompare;
     try {
-      const fd = buildFormDataFromFilters(filters, isCompare);
+      const fd = buildFormDataFromFilters(filters, inCompare);
       const json = await postJSON(
-        isCompare
+        inCompare
           ? ENDPOINTS.filteredCompare(API_BASE)
           : ENDPOINTS.filteredSingle(API_BASE),
         fd
       );
-      if (isCompare) {
+      if (inCompare) {
         setFilteredFiguresByLabel(json.figures || {});
       } else {
         setFilteredOverviewFigureJson(json.overview_plot ?? null);
@@ -368,13 +404,13 @@ function MotifViewer() {
   async function downloadFiltered(merge?: boolean) {
     if (!lastFilters)
       return alert("Apply filters at least once before downloading.");
-    const isCompare = compareMode;
+    const inCompare = isCompare;
     try {
-      const fd = buildFormDataFromFilters(lastFilters, isCompare);
+      const fd = buildFormDataFromFilters(lastFilters, inCompare);
       fd.set("download", "true");
-      if (isCompare) fd.set("merge", String(!!merge));
+      if (inCompare) fd.set("merge", String(!!merge));
       const blob = await postBlob(
-        isCompare
+        inCompare
           ? ENDPOINTS.filteredCompare(API_BASE)
           : ENDPOINTS.filteredSingle(API_BASE),
         fd
@@ -382,7 +418,7 @@ function MotifViewer() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = isCompare
+      a.download = inCompare
         ? merge
           ? `${sessionId ?? "motif_hits"}_merged.csv`
           : `${sessionId ?? "motif_hits"}.zip`
@@ -432,9 +468,10 @@ function MotifViewer() {
                   />
                 </h4>
 
+                {/* Compare block now bound to context */}
                 <CompareInputs
-                  compareMode={compareMode}
-                  setCompareMode={setCompareMode}
+                  compareMode={isCompare}
+                  setCompareMode={setIsCompare}
                   labelA={labelA}
                   setLabelA={setLabelA}
                   labelB={labelB}
@@ -446,7 +483,7 @@ function MotifViewer() {
                 />
 
                 <GenomicInput
-                  compareMode={compareMode}
+                  compareMode={isCompare}
                   dataType={dataType}
                   setDataType={setDataType}
                   bedFile={bedFile}
@@ -456,11 +493,11 @@ function MotifViewer() {
                   inputWindow={inputWindow}
                   setInputWindow={setInputWindow}
                   onProcess={async () => {
-                    if (compareMode) await handleGetGenomicInputCompare();
+                    if (isCompare) await handleGetGenomicInputCompare();
                     else await handleGetGenomicInput();
                   }}
                   canProcess={
-                    compareMode
+                    isCompare
                       ? Boolean(
                           labelA && labelB && geneListFileA && geneListFileB
                         )
@@ -560,13 +597,13 @@ Enter a name and choose a color for each motif.`}
                   onFinishedScan();
                   goNext();
                 }}
-                compareMode={compareMode}
+                compareMode={isCompare}
                 sessionId={sessionId}
               />
             )}
 
             {activeStep === 3 &&
-              (compareMode ? (
+              (isCompare ? (
                 <GetFilterDataCompare
                   sessionId={sessionId!}
                   scanComplete={scanComplete}
@@ -588,7 +625,7 @@ Enter a name and choose a color for each motif.`}
 
             {activeStep === 4 && (
               <>
-                {compareMode ? (
+                {isCompare ? (
                   <>
                     <FiltersBar
                       motifList={validatedMotifNames}
@@ -656,7 +693,7 @@ Enter a name and choose a color for each motif.`}
             )}
 
             {activeStep === 5 &&
-              (compareMode ? (
+              (isCompare ? (
                 <BigWigOverlayCompare
                   sessionId={sessionId}
                   inputWindow={inputWindow}

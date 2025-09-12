@@ -10,8 +10,6 @@ function App() {
     <Router>
       <TFProvider>
         <MotifViewerProvider>
-          {" "}
-          {/* ✅ Wrap it here */}
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<MotifViewer />} />

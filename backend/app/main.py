@@ -1403,5 +1403,5 @@ async def filter_tfs(
         gene_list = df.iloc[:, 0].dropna().tolist()
 
     tf_results = filter_tfs_from_gene_list(gene_list)
-    print(tf_results)
+    #print(tf_results)
     return {"tfs": tf_results}

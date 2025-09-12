@@ -128,7 +128,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
         onClick={handleFilterMotifHits}
         disabled={!scanComplete || (!atacBedFile && !chipBedFile)}
       >
-        {filterComplete ? "✅ Filtered!" : "🧪 Filter & Score Motif Hits"}
+        {filterComplete ? "Filtered!" : "Filter & Score Motif Hits"}
       </button>
 
       {filterComplete && (
@@ -136,7 +136,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
           Motif hits have been filtered and scored!
         </div>
       )}
-
+      {/*
       {filterComplete && dataId && (
         <a
           href={`${API_BASE}/download-top-hits/${dataId}`}
@@ -145,7 +145,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
         >
           ⬇ Download Top Hits
         </a>
-      )}
+      )} */}
 
       {!scanComplete && (
         <div className="mt-2">
