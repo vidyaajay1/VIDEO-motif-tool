@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-import os, subprocess, tempfile, textwrap
+import os, subprocess, tempfile, textwrap, shutil
 from typing import Optional, List, Dict, Tuple
 from pyfaidx import Fasta
 from app.new_process_input import Motif
@@ -87,37 +87,32 @@ Background letter frequencies
 
 
 def run_fimo(
-    meme_file: str, #path to the motif meme-formatted file
-    sequences_file: str, #path to the fasta promoter sequence file
+    meme_file: str,
+    sequences_file: str,
     output_dir: Optional[str] = None,
-    threshold: float = 1e-4 #threshold for FIMO p-value for reporting hits.
-) -> pd.DataFrame: 
+    threshold: float = 1e-4,
+    fimo_exe: Optional[str] = None,   # NEW
+) -> pd.DataFrame:
 
-    #Returns: fimo.tsv (motif_id, motif_alt_id, sequence_name, start, stop, strand, score, p-value, q-value, matched_sequence).
+    exe = fimo_exe or shutil.which("fimo")
+    if not exe:
+        raise RuntimeError(
+            "FIMO binary not found. Install MEME Suite (bioconda: meme) or set fimo_exe to an absolute path. "
+            "Also ensure your systemd service PATH includes the FIMO directory."
+        )
+
     with tempfile.TemporaryDirectory() as tmpdir:
-        if output_dir is None:
-            fimo_out = os.path.join(tmpdir, "fimo_out")
-        else:
-            fimo_out = output_dir
-            os.makedirs(fimo_out, exist_ok=True)
-        #run FIMO
-        cmd = [
-            "fimo",
-            "--thresh", str(threshold),
-            "--oc", fimo_out,
-            meme_file,
-            sequences_file
-        ]
+        fimo_out = output_dir or os.path.join(tmpdir, "fimo_out")
+        os.makedirs(fimo_out, exist_ok=True)
+        cmd = [exe, "--thresh", str(threshold), "--oc", fimo_out, meme_file, sequences_file]
         subprocess.run(cmd, check=True)
         results_tsv = os.path.join(fimo_out, "fimo.tsv")
         try:
             df = pd.read_csv(results_tsv, sep="\t", comment="#")
         except pd.errors.EmptyDataError:
             print(f"No FIMO hits found at threshold {threshold}")
-            df = pd.DataFrame()  # return empty dataframe
-
+            df = pd.DataFrame()
     return df
-
 
 
 def build_motif_hits(
