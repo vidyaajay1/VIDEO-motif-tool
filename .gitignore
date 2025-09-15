@@ -34,3 +34,4 @@ backend/app/
 
 backend/app/static
 *.svg
+backend/.venv/
