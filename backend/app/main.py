@@ -100,11 +100,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 os.makedirs(TMP_DIR, exist_ok=True)
-app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+#app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
+#app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+app.mount("/api/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
+app.mount("/api/static", StaticFiles(directory="app/static"), name="static")
+
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    #allow_origins=["http://localhost:5173"],
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,6 +120,9 @@ app.add_middleware(
 def health():
     return {"ok": True}
 
+@app.get("/api/health")
+def health_api():
+    return {"ok": True, "path": "/api/health"}
 
 @app.post("/get-genomic-input", response_model=OverviewResponse)
 async def get_genomic_input(
