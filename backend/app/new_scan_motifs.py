@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Tuple
 from pyfaidx import Fasta
 from app.new_process_input import Motif
 
+FIMO_PATH = "/home/ec2-user/miniconda3/envs/memesuite/bin/fimo"
 #write the peaks_df to a meme-formatted txt file
 def peaks_df_to_fasta(
     peaks_df: pd.DataFrame,
@@ -192,6 +193,7 @@ def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list:List[Motif], fimo_
     motifs_fp = "fimo_files/motifs.txt"
     peaks_df_to_fasta(peaks_df, ref_fasta, fasta_fp, window_size)
     motif_to_memefile(motif_list, motifs_fp)
-    fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold)
+    #fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold)
+    fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold, fimo_exe=FIMO_PATH)
     motif_hits, df_hits = build_motif_hits(fimo_tsv, peaks_df, motif_list)
     return motif_hits, df_hits
