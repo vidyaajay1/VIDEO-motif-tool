@@ -29,8 +29,11 @@ backend/fimo_files/
 #tmp
 backend/tmp/
 
-backend/app/
-*.ipynb
+backend/app/*.ipynb
+backend/app/__pycache__/
+backend/app/*.pyc
+backend/app/*.log
+backend/app/static/
 
 backend/app/static
 *.svg
