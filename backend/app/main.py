@@ -1,7 +1,6 @@
 import os, uuid, shutil, pickle, json, csv, re, io, zipfile
 import pandas as pd
 from functools import reduce
-from operator import and_
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Request,  HTTPException, Query
 from fastapi.responses import Response
@@ -9,7 +8,18 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any, Tuple
-from pydantic import BaseModel, AnyUrl
+from redis import Redis
+from rq import Queue, Retry
+from rq.job import Job
+from app.tasks import (
+    scan_session_batch, 
+    scan_single_dataset,
+    plot_overview_single_task,
+    plot_overview_compare_task,
+    filter_score_single_task, 
+    filter_score_batch_task,
+    plot_filtered_single_task, 
+    plot_filtered_compare_task)
 from app.new_process_input import process_genomic_input, get_motif_list
 from app.new_scan_motifs import scan_wrapper
 from app.filter_motifs import filter_motif_hits
@@ -19,64 +29,15 @@ from app.bigwig_overlay import fetch_bw_coverage, plot_chip_overlay
 from app.run_streme import write_fasta_from_genes, run_streme_on_fasta, parse_streme_results
 from app.process_tomtom import subset_by_genes
 from app.filter_tfs import filter_tfs_from_gene_list
-from app.utils import _parse_per_motif_pvals, _df_to_records_json_safe, _df_to_csv_bytes
+from app.utils import clear_tmp_dir, _parse_per_motif_pvals, _df_to_records_json_safe, _df_to_csv_bytes
 from app.mem_logger import start_mem_logger
-
-class DatasetInfo(BaseModel):
-    data_id: str
-    label: str
-    peak_list: List[str]
-
-class CompareInitResponse(BaseModel):
-    session_id: str
-    datasets: List[DatasetInfo]
-
-class BatchScanResponse(BaseModel):
-    session_id: str
-    datasets: List[str]  # data_ids scanned
-
-class ComparePlotResponse(BaseModel):
-    session_id: str
-    figures: Dict[str, str]
-    ordered_peaks: Dict[str, List[str]]
-    final_hits: Dict[str, List[Dict[str, Any]]]  # {label: [peak_ids]}
-    
-class OverviewResponse(BaseModel):
-    genome: str
-    peaks_df: List[Dict[str, Any]]
-    data_id: str
-    peak_list: List[str]
-
-# --- Update your response model to carry Plotly JSON ---
-class PlotOverviewResponse(BaseModel):
-    data_id: str
-    peak_list: List[str]          # ordered to match the plot
-    overview_plot: str            # Plotly figure as JSON string
-    final_hits: List[Dict[str, Any]] 
-
-class ScannerResponse(BaseModel):
-    data_id: str
-
+import app.models as models
 
 TMP_DIR = "tmp"
 TF_DATA_CACHE = {}  # type: Dict[str, pd.DataFrame]
-def clear_tmp_dir():
-    if os.path.isdir(TMP_DIR):
-        for name in os.listdir(TMP_DIR):
-            path = os.path.join(TMP_DIR, name)
-            try:
-                if os.path.isfile(path) or os.path.islink(path):
-                    os.unlink(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path)
-            except Exception as e:
-                print(f"Couldn't remove {path}: {e}")
-    else:
-        os.makedirs(TMP_DIR, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # your existing init work
     clear_tmp_dir()
     global TF_DATA_CACHE
     data_file = os.path.join("data", "tables2.xlsx")
@@ -91,11 +52,12 @@ async def lifespan(app: FastAPI):
             print(f"Error loading Excel sheets: {e}")
     else:
         print("Warning: Data file not found, cache is empty.")
-
-    # start the memory logger here
     start_mem_logger(5)
+    yield 
 
-    yield  # ---- app runs ----
+# create a Redis connection and an RQ queue (do once)
+redis_conn = Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", "6379")), db=0)
+q = Queue("cpu", connection=redis_conn, default_timeout="3600")  # 1 hour default timeout
 
 
 app = FastAPI(lifespan=lifespan)
@@ -109,7 +71,6 @@ app.mount("/api/static", StaticFiles(directory="app/static"), name="static")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    #allow_origins=["http://localhost:5173"],
     allow_origins=[o.strip() for o in ALLOWED_ORIGINS if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
@@ -124,13 +85,12 @@ def health():
 def health_api():
     return {"ok": True, "path": "/api/health"}
 
-@app.post("/get-genomic-input", response_model=OverviewResponse)
+@app.post("/get-genomic-input", response_model=models.OverviewResponse)
 async def get_genomic_input(
     bed_file: Optional[UploadFile] = File(None),
     gene_list_file: Optional[UploadFile] = File(None),
     window_size: int = Form(500),
 ):
-    # ensure our temp directory exists
     os.makedirs(TMP_DIR, exist_ok=True)
 
     if bed_file is None and gene_list_file is None:
@@ -138,15 +98,14 @@ async def get_genomic_input(
             {"error": "Provide a gene list or a BED file"},
             status_code=400
         )
-    
-    # ————— handle BED upload —————
+    # handle bed upload
     bed_path: Optional[str] = None
     if bed_file is not None:
         bed_path = os.path.join(TMP_DIR, f"{uuid.uuid4().hex}.bed")
         with open(bed_path, "wb") as out:
             shutil.copyfileobj(bed_file.file, out)
 
-    # ————— handle gene-list upload —————
+    # handle gene-list upload 
     gene_list: List[str] = []
     gene_lfc: Dict[str, float] = {} #this is a dummy lfc
     if gene_list_file:
@@ -165,15 +124,14 @@ async def get_genomic_input(
                 gene = row[0].strip()
                 gene_list.append(gene)
 
-        # Assign dummy scores: ranking for top genes
+        # assign dummy scores: ranking for top genes
         N = len(gene_list)
         gene_lfc = {
             gene: float(N - idx)
             for idx, gene in enumerate(gene_list)
-        }
-        
+        }      
 
-    # ————— build peaks_df —————
+    # build peaks_df
     peaks_df = process_genomic_input(
         genome_filepath="fasta/genome.fa",
         gtf_filepath="fasta/dmel_genes.gtf",
@@ -204,7 +162,7 @@ async def get_genomic_input(
         peak_list,
         key=lambda pid: abs(gene_lfc.get(extract_gene(pid), float("-inf")))
     )
-    return OverviewResponse(
+    return models.OverviewResponse(
         genome="fasta/genome.fa",
         peaks_df=peaks_df.to_dict(orient="records"),
         data_id=data_id,
@@ -212,11 +170,11 @@ async def get_genomic_input(
     )
 
 
-def _save_session(session_id: str, datasets: List[DatasetInfo]):
+def _save_session(session_id: str, datasets: List[models.DatasetInfo]):
     with open(os.path.join(TMP_DIR, f"{session_id}_datasets.pkl"), "wb") as f:
         pickle.dump(datasets, f)
 
-def _load_session(session_id: str) -> List[DatasetInfo]:
+def _load_session(session_id: str) -> List[models.DatasetInfo]:
     try:
         with open(os.path.join(TMP_DIR, f"{session_id}_datasets.pkl"), "rb") as f:
             return pickle.load(f)
@@ -287,7 +245,8 @@ def _create_dataset_from_inputs(
     peak_list = list(peaks_df["Peak_ID"])
     peak_list = sorted(peak_list, key=lambda pid: abs(gene_lfc.get(extract_gene(pid), float("-inf"))))
     return data_id, peaks_df, gene_lfc, peak_list
-@app.post("/get-genomic-input-compare", response_model=CompareInitResponse)
+
+@app.post("/get-genomic-input-compare", response_model=models.CompareInitResponse)
 async def get_genomic_input_compare(
     # list A
     bed_file_a: Optional[UploadFile] = File(None),
@@ -306,11 +265,11 @@ async def get_genomic_input_compare(
 
     session_id = uuid.uuid4().hex
     datasets = [
-        DatasetInfo(data_id=data_id_a, label=label_a, peak_list=peak_list_a),
-        DatasetInfo(data_id=data_id_b, label=label_b, peak_list=peak_list_b),
+        models.DatasetInfo(data_id=data_id_a, label=label_a, peak_list=peak_list_a),
+        models.DatasetInfo(data_id=data_id_b, label=label_b, peak_list=peak_list_b),
     ]
     _save_session(session_id, datasets)
-    return CompareInitResponse(session_id=session_id, datasets=datasets)
+    return models.CompareInitResponse(session_id=session_id, datasets=datasets)
 
 @app.post("/validate-motifs-group")
 async def validate_motifs_group(
@@ -345,292 +304,248 @@ async def validate_motifs(
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok", "count": len(motif_list)}
 
-@app.post("/get-motif-hits-batch", response_model=BatchScanResponse)
-async def get_motif_hits_batch(
-    session_id: str = Form(...),
-    window: int = Form(500),
-    fimo_threshold: float = Form(0.005),
-):
-    datasets = _load_session(session_id)
 
-    # load session-level motifs
-    try:
-        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="Run /validate-motifs-group first for this session")
-
-    scanned_ids = []
-    for ds in datasets:
-        try:
-            peaks_df = pd.read_pickle(f"{TMP_DIR}/{ds.data_id}_peaks.pkl")
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail=f"No cached peaks for {ds.data_id}")
-
-        motif_hits, df_hits = scan_wrapper(peaks_df, "fasta/genome.fa", window, motif_list, fimo_threshold)
-
-        with open(f"{TMP_DIR}/{ds.data_id}_motif_hits.pkl", "wb") as f:
-            pickle.dump(motif_hits, f)
-        with open(f"{TMP_DIR}/{ds.data_id}_df_hits.pkl", "wb") as f:
-            pickle.dump(df_hits, f)
-        scanned_ids.append(ds.data_id)
-
-    return BatchScanResponse(session_id=session_id, datasets=scanned_ids)
-
-@app.post("/get-motif-hits", response_model=ScannerResponse)
+@app.post("/get-motif-hits", response_model=models.EnqueueResponse)
 async def get_motif_hits(
     motifs: list[str] = Form(...),
     window: int = Form(500),
     fimo_threshold: float = Form(0.005),
     data_id: str = Form(...)
-    ):
+):
     if not motifs:
         raise HTTPException(status_code=400, detail="At least one motif is required")
 
+    # (light) preflight checks to fail fast
     try:
-        motif_list = pd.read_pickle(f"{TMP_DIR}/{data_id}_motif_list.pkl")
+        pd.read_pickle(f"{TMP_DIR}/{data_id}_motif_list.pkl")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid motifs: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid motifs for {data_id}: {e}")
 
     try:
-        peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
+        pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached peak data here - try after running Process Genomic Input!")
+        raise HTTPException(status_code=404, detail="No cached peak data here - run Process Genomic Input!")
 
-    motif_hits, df_hits = scan_wrapper(peaks_df, "fasta/genome.fa", window, motif_list, fimo_threshold)
+    # enqueue the heavy job
+    job = q.enqueue(
+        scan_single_dataset,
+        data_id,
+        window,
+        fimo_threshold,
+        retry=Retry(max=3, interval=[10, 30, 60]),
+        job_timeout="600"  # 10 min; adjust acc to workload
+    )
+    return {"job_id": job.get_id()}
 
+@app.post("/get-motif-hits-batch", response_model=models.EnqueueResponse)
+async def get_motif_hits_batch(
+    session_id: str = Form(...),
+    window: int = Form(500),
+    fimo_threshold: float = Form(0.005),
+):
+    # load datasets list first 
+    datasets = _load_session(session_id)
+    dataset_ids = [ds.data_id for ds in datasets]
 
-    with open(f"{TMP_DIR}/{data_id}_motif_hits.pkl", "wb") as f:
-        pickle.dump(motif_hits, f)
-    with open(f"{TMP_DIR}/{data_id}_df_hits.pkl", "wb") as f:
-        pickle.dump(df_hits, f)
-    return {
-        "data_id": data_id
+    # preflight checks
+    try:
+        pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Run /validate-motifs-group first for this session")
+
+    for dsid in dataset_ids:
+        if not os.path.exists(f"{TMP_DIR}/{dsid}_peaks.pkl"):
+            raise HTTPException(status_code=404, detail=f"No cached peaks for {dsid}")
+
+    # enqueue ONE job to process all datasets for this session
+    job = q.enqueue(
+        scan_session_batch,
+        session_id,
+        dataset_ids,
+        window,
+        fimo_threshold,
+        retry=Retry(max=3, interval=[10, 30, 60]),
+        job_timeout="1200"  # 20 min for big batches
+    )
+    return {"job_id": job.get_id()}
+
+# a small status endpoint to poll job state
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str):
+    try:
+        job = Job.fetch(job_id, connection=redis_conn)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    state = job.get_status()  # 'queued' | 'started' | 'finished' | 'failed' | 'deferred'
+    resp = {
+        "job_id": job_id,
+        "status": state,
+        "progress": job.meta.get("progress", None),
     }
+    if state == "failed":
+        resp["error"] = str(job.exc_info)[-2000:] if job.exc_info else "Unknown error"
+    if state == "finished":
+        # We only return a tiny result; the real artifacts are on disk under TMP_DIR
+        resp["result"] = job.result
+    return resp
 
+@app.post("/plot-motif-overview", response_model=dict)  # returns {"job_id": "..."}
+async def plot_motif_overview_enqueue(
+    window: int = Form(500),
+    data_id: str = Form(...),
+    per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),
+):
+    # quick preflight so users get fast feedback
+    needs = [f"{TMP_DIR}/{data_id}_peaks.pkl", f"{TMP_DIR}/{data_id}_df_hits.pkl",
+             f"{TMP_DIR}/{data_id}_motif_list.pkl", f"{TMP_DIR}/{data_id}_genes_lfc.pkl"]
+    for p in needs:
+        if not os.path.exists(p):
+            raise HTTPException(status_code=404, detail=f"Missing cache: {os.path.basename(p)}")
 
+    want_download = download.lower() in ("true", "1", "csv")
+    job = q.enqueue(
+        plot_overview_single_task,
+        data_id, window, per_motif_pvals_json, want_download,
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="3600",
+    )
+    return {"job_id": job.get_id()}
 
-@app.post("/plot-motif-overview-compare", response_model=ComparePlotResponse)
-async def plot_motif_overview_compare(
+@app.get("/plots/overview/{data_id}")
+def fetch_plot_overview(data_id: str):
+    # return the JSON artifacts if they exist
+    try:
+        fig = json.load(open(os.path.join(TMP_DIR, f"{data_id}_overview.json")))
+        ordered = json.load(open(os.path.join(TMP_DIR, f"{data_id}_ordered_peaks.json")))
+        final_hits = json.load(open(os.path.join(TMP_DIR, f"{data_id}_final_hits.json")))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifacts not ready")
+    return {
+        "overview_plot": fig,
+        "data_id": data_id,
+        "peak_list": ordered,
+        "final_hits": final_hits,
+    }
+@app.get("/download/overview/{data_id}")
+def download_overview_csv(data_id: str):
+    fp = os.path.join(TMP_DIR, f"{data_id}_final_hits.csv")
+    if not os.path.exists(fp):
+        raise HTTPException(status_code=404, detail="CSV not found (did you request download?)")
+    return Response(
+        content=open(fp, "rb").read(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename=\"{data_id}_final_hits.csv\"'}
+    )
+
+@app.post("/plot-motif-overview-compare", response_model=dict)  # returns {"job_id": "..."}
+async def plot_motif_overview_compare_enqueue(
     session_id: str = Form(...),
     window: int = Form(500),
     per_motif_pvals_json: str = Form(default=""),
-    download: str = Form("false"),              
-    merge: str = Form("true"), 
+    download: str = Form("false"),
+    merge: str = Form("true"),
 ):
-    datasets = _load_session(session_id)
-
-    # shared motif list
-    try:
-        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
-    except FileNotFoundError:
+    # preflight
+    if not os.path.exists(os.path.join(TMP_DIR, f"{session_id}_motif_list.pkl")):
         raise HTTPException(status_code=404, detail="No cached motif_list for this session")
 
-    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
-
-    figures: Dict[str, str] = {}
-    ordered: Dict[str, List[str]] = {}
-    final_hits: Dict[str, List[Dict[str, Any]]] = {}
-    dfs_by_label: Dict[str, pd.DataFrame] = {}  
-    merge_files     = merge.lower() in ("true", "1", "yes")
-    
+    # validate datasets have their caches
     datasets = _load_session(session_id)
     for ds in datasets:
-        data_id = ds.data_id
-        label = ds.label
+        for suf in ("_peaks.pkl", "_df_hits.pkl", "_genes_lfc.pkl"):
+            p = os.path.join(TMP_DIR, f"{ds.data_id}{suf}")
+            if not os.path.exists(p):
+                raise HTTPException(status_code=404, detail=f"Cache miss for {ds.label}: {os.path.basename(p)}")
 
-        try:
-            peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
-            df_hits  = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
-            gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=404, detail=f"Cache miss for dataset {label}: {e}")
+    want_download = download.lower() in ("true", "1", "csv", "zip")
+    merge_files  = merge.lower() in ("true", "1", "yes")
 
-        peak_ranks = rank_peaks_for_plot(
-            df_hits=df_hits,
-            gene_lfc=gene_lfc,
-            peaks_df=peaks_df,
-            use_hit_number=False,
-            use_match_score=False,
-            motif=None,
-            best_transcript=False,
-            min_score_bits=0.0,
-            per_motif_pvals=per_motif_pvals,
-        )
-        fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
-            peak_list=list(peak_ranks.keys()),
-            peaks_df=peaks_df,
-            motif_list=motif_list,
-            df_hits=df_hits,
-            window=window,
-            peak_rank=peak_ranks,
-            title=f"Motif hits — {label}",
-            min_score_bits=0.0,
-            per_motif_pvals=per_motif_pvals,
-        )
-        figures[label] = fig.to_json()
-        ordered[label] = ordered_peaks
-        final_hits[label] = _df_to_records_json_safe(final_hits_df)   # NEW
-        dfs_by_label[label] = final_hits_df
-    # If download requested, return CSV/ZIP instead of JSON:
-    if download.lower() in ("true", "1", "csv", "zip"):
-        if merge_files:
-            merged = []
-            for label, df in dfs_by_label.items():
-                df2 = df.copy()
-                df2.insert(0, "Dataset", label)
-                merged.append(df2)
-            merged_df = pd.concat(merged, ignore_index=True) if merged else pd.DataFrame()
-            csv_bytes = _df_to_csv_bytes(merged_df)
-            filename = f"{session_id}_final_hits_merged.csv"
-            return Response(
-                content=csv_bytes,
-                media_type="text/csv",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-            )
-        else:
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
-                for label, df in dfs_by_label.items():
-                    z.writestr(f"{label}_final_hits.csv", _df_to_csv_bytes(df))
-            zip_buf.seek(0)
-            filename = f"{session_id}_final_hits.zip"
-            return StreamingResponse(
-                zip_buf,
-                media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-            )
-
-    # default: JSON as before
-    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered, final_hits=final_hits)
-
-@app.post("/plot-motif-overview", response_model=PlotOverviewResponse)
-async def plot_motif_overview(
-    request: Request,
-    window: int = Form(500),
-    data_id: str = Form(...),
-    per_motif_pvals_json: str = Form(default=""),
-    download: str = Form("false"),    # NEW
-):
-    # Load cached data
-    try:
-        peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached peaks for given data_id")
-
-    try:
-        df_hits = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached motif_hits for given data_id")
-
-    try:
-        motif_list = pd.read_pickle(f"{TMP_DIR}/{data_id}_motif_list.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached motif_list for given data_id")
-
-    try:
-        gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached gene_logfc dict for given data_id")
-
-    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
-    peak_ranks = rank_peaks_for_plot(
-        df_hits=df_hits,
-        gene_lfc=gene_lfc,
-        peaks_df=peaks_df,
-        use_hit_number=False,
-        use_match_score=False,
-        motif=None,
-        best_transcript=False,
-        min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,    # NEW
+    job = q.enqueue(
+        plot_overview_compare_task,
+        session_id, window, per_motif_pvals_json, want_download, merge_files,
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="7200",
     )
+    return {"job_id": job.get_id()}
 
-    fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
-        peak_list=list(peak_ranks.keys()),
-        peaks_df=peaks_df,
-        motif_list=motif_list,
-        df_hits=df_hits,
-        window=window,
-        peak_rank=peak_ranks,
-        title="Motif hits",
-        min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,
-    )
+@app.get("/plots/overview-compare/{session_id}")
+def fetch_plot_overview_compare(session_id: str):
+    # collect per-label JSONs
+    from glob import glob
+    pattern = os.path.join(TMP_DIR, f"{session_id}_*_overview.json")
+    files = glob(pattern)
+    if not files:
+        raise HTTPException(status_code=404, detail="Artifacts not ready")
 
-    fig_json = fig.to_json()
-
-    # Serialize final hits for the client
-    final_hits_records = _df_to_records_json_safe(final_hits_df)
-    # If the client asked for a file, return a CSV instead of JSON:
-    if download.lower() in ("true", "1", "csv"):
-        csv_bytes = _df_to_csv_bytes(final_hits_df)
-        filename = f"{data_id}_final_hits.csv"
-        return Response(
-            content=csv_bytes,
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
+    figures, ordered, final_hits = {}, {}, {}
+    for fp in files:
+        # file name: {session_id}_{label}_overview.json
+        fname = os.path.basename(fp)
+        label = fname[len(session_id)+1:].replace("_overview.json", "")
+        figures[label] = json.load(open(fp))
+        ordered[label] = json.load(open(os.path.join(TMP_DIR, f"{session_id}_{label}_ordered_peaks.json")))
+        final_hits[label] = json.load(open(os.path.join(TMP_DIR, f"{session_id}_{label}_final_hits.json")))
     return {
-        "overview_plot": fig_json,
-        "data_id": data_id,
-        "peak_list": ordered_peaks,
-        "final_hits": final_hits_records,  # NEW
+        "session_id": session_id,
+        "figures": figures,
+        "ordered_peaks": ordered,
+        "final_hits": final_hits,
     }
 
-@app.post("/filter-motif-hits", response_model=ScannerResponse)
-async def filter_and_score(
-    atac_bed: UploadFile = File(None),      # now optional
-    chip_bed: UploadFile = File(None),      # now optional
+@app.get("/download/overview-compare/{session_id}")
+def download_overview_compare(session_id: str, merged: bool = True):
+    if merged:
+        fp = os.path.join(TMP_DIR, f"{session_id}_final_hits_merged.csv")
+        if not os.path.exists(fp):
+            raise HTTPException(status_code=404, detail="Merged CSV not found (did you request merge+download?)")
+        return Response(
+            content=open(fp, "rb").read(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename=\"{session_id}_final_hits_merged.csv\"'}
+        )
+    else:
+        fp = os.path.join(TMP_DIR, f"{session_id}_final_hits.zip")
+        if not os.path.exists(fp):
+            raise HTTPException(status_code=404, detail="ZIP not found (did you request split+download?)")
+        return Response(
+            content=open(fp, "rb").read(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename=\"{session_id}_final_hits.zip\"'}
+        )
+
+
+@app.post("/filter-motif-hits")
+async def filter_and_score_enqueue(
+    atac_bed: UploadFile = File(None),
+    chip_bed: UploadFile = File(None),
     data_id: str = Form(...),
 ):
+    # Write uploads to TMP_DIR (web thread) — then worker reads from disk.
+    have_atac = have_chip = False
     if not atac_bed and not chip_bed:
-        raise HTTPException(
-            status_code=400,
-            detail="You must provide at least one of ATAC or ChIP BED files."
-        )
-    try:
-        with open(f"{TMP_DIR}/{data_id}_df_hits.pkl","rb") as f:
-            df_hits = pickle.load(f)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Missing cache for data_id")
-
-    empty_hits = pd.DataFrame(columns=df_hits.columns)
+        raise HTTPException(status_code=400, detail="Provide at least one of ATAC/ChIP.")
 
     if atac_bed:
         atac_path = os.path.join(TMP_DIR, f"{data_id}_atac.bed")
-        with open(atac_path,"wb") as f:
-            f.write(await atac_bed.read())
-        atac_filt_hits = filter_motif_hits(df_hits, atac_path)
-        with open(f"{TMP_DIR}/{data_id}_atac_filt_hits.pkl","wb") as f:
-            pickle.dump(atac_filt_hits, f)
-    else:
-        atac_filt_hits = empty_hits
-
+        with open(atac_path, "wb") as f: f.write(await atac_bed.read())
+        have_atac = True
     if chip_bed:
         chip_path = os.path.join(TMP_DIR, f"{data_id}_chip.bed")
-        with open(chip_path,"wb") as f:
-            f.write(await chip_bed.read())
-        chip_filt_hits = filter_motif_hits(df_hits, chip_path)
-        with open(f"{TMP_DIR}/{data_id}_chip_filt_hits.pkl","wb") as f:
-            pickle.dump(chip_filt_hits, f)
-    else:
-        chip_filt_hits = empty_hits
+        with open(chip_path, "wb") as f: f.write(await chip_bed.read())
+        have_chip = True
 
-    scored_df = score_and_merge(df_hits, chip_filt_hits, atac_filt_hits)
-
-    ranked_df = score_hit_naive_bayes(scored_df)
-    top_hits = (
-        ranked_df
-        .reset_index()
-        .sort_values("P_regulatory", ascending=False)
-        [["Peak_ID", "Motif", "P_regulatory", "M_prom", "M_chip", "M_atac", "logFC", "FIMO_score"]]
+    job = q.enqueue(
+        filter_score_single_task,
+        data_id, have_atac, have_chip,
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="1800",
     )
-    top_hits.to_csv(f"{TMP_DIR}/{data_id}_top_hits.tsv", sep="\t", index=False)
+    return {"job_id": job.get_id()}
 
-    return {"data_id": data_id}
-
-@app.post("/filter-motif-hits-batch", response_model=BatchScanResponse)
-async def filter_and_score_batch(
+@app.post("/filter-motif-hits-batch")
+async def filter_and_score_batch_enqueue(
     session_id: str = Form(...),
     atac_bed_shared: UploadFile = File(None),
     chip_bed_shared: UploadFile = File(None),
@@ -648,140 +563,89 @@ async def filter_and_score_batch(
     if not (any_shared or any_ab):
         raise HTTPException(status_code=400, detail="Provide at least one ATAC or ChIP BED.")
 
-    # ---------- helper ----------
-    async def _filter_one_dataset(data_id: str, atac: bytes | None, chip: bytes | None) -> None:
-        try:
-            with open(f"{TMP_DIR}/{data_id}_df_hits.pkl","rb") as f:
-                df_hits = pickle.load(f)
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Missing cache for data_id {data_id}")
-
-        empty_hits = pd.DataFrame(columns=df_hits.columns)
-
-        # ATAC
-        if atac:
-            atac_path = os.path.join(TMP_DIR, f"{data_id}_atac.bed")
-            with open(atac_path, "wb") as f:
-                f.write(atac)
-            atac_filt_hits = filter_motif_hits(df_hits, atac_path)
-        else:
-            atac_filt_hits = empty_hits
-        with open(f"{TMP_DIR}/{data_id}_atac_filt_hits.pkl","wb") as f:
-            pickle.dump(atac_filt_hits, f)
-
-        # ChIP
-        if chip:
-            chip_path = os.path.join(TMP_DIR, f"{data_id}_chip.bed")
-            with open(chip_path, "wb") as f:
-                f.write(chip)
-            chip_filt_hits = filter_motif_hits(df_hits, chip_path)
-        else:
-            chip_filt_hits = empty_hits
-        with open(f"{TMP_DIR}/{data_id}_chip_filt_hits.pkl","wb") as f:
-            pickle.dump(chip_filt_hits, f)
-
-        # scoring
-        scored_df = score_and_merge(df_hits, chip_filt_hits, atac_filt_hits)
-        ranked_df = score_hit_naive_bayes(scored_df)
-        top_hits = (
-            ranked_df.reset_index()
-                     .sort_values("P_regulatory", ascending=False)
-                     [["Peak_ID","Motif","P_regulatory","M_prom","M_chip","M_atac","logFC","FIMO_score"]]
-        )
-        top_hits.to_csv(f"{TMP_DIR}/{data_id}_top_hits.tsv", sep="\t", index=False)
-
-    processed: list[str] = []
-
     if any_shared:
-        # Read ONCE, reuse the bytes across all datasets
-        atac_bytes = await atac_bed_shared.read() if atac_bed_shared else None
-        chip_bytes = await chip_bed_shared.read() if chip_bed_shared else None
-
-        for ds in datasets:
-            await _filter_one_dataset(ds.data_id, atac_bytes, chip_bytes)
-            processed.append(ds.data_id)
+        # Save once under session-level names
+        if atac_bed_shared:
+            with open(os.path.join(TMP_DIR, f"{session_id}_atac_shared.bed"), "wb") as f:
+                f.write(await atac_bed_shared.read())
+        if chip_bed_shared:
+            with open(os.path.join(TMP_DIR, f"{session_id}_chip_shared.bed"), "wb") as f:
+                f.write(await chip_bed_shared.read())
+        mode = "shared"
     else:
+        # Must have exactly 2 datasets for A/B
         if len(datasets) != 2:
-            raise HTTPException(status_code=400, detail="Per-dataset A/B uploads require exactly two datasets.")
-        # Read each upload ONCE
-        a_atac = await atac_bed_a.read() if atac_bed_a else None
-        a_chip = await chip_bed_a.read() if chip_bed_a else None
-        b_atac = await atac_bed_b.read() if atac_bed_b else None
-        b_chip = await chip_bed_b.read() if chip_bed_b else None
+            raise HTTPException(status_code=400, detail="A/B uploads require exactly two datasets.")
+        # Save per-dataset (A = datasets[0], B = datasets[1])
+        dsA, dsB = datasets[0].data_id, datasets[1].data_id
+        if atac_bed_a:
+            with open(os.path.join(TMP_DIR, f"{dsA}_atac.bed"), "wb") as f: f.write(await atac_bed_a.read())
+        if chip_bed_a:
+            with open(os.path.join(TMP_DIR, f"{dsA}_chip.bed"), "wb") as f: f.write(await chip_bed_a.read())
+        if atac_bed_b:
+            with open(os.path.join(TMP_DIR, f"{dsB}_atac.bed"), "wb") as f: f.write(await atac_bed_b.read())
+        if chip_bed_b:
+            with open(os.path.join(TMP_DIR, f"{dsB}_chip.bed"), "wb") as f: f.write(await chip_bed_b.read())
+        mode = "ab"
 
-        await _filter_one_dataset(datasets[0].data_id, a_atac, a_chip)
-        await _filter_one_dataset(datasets[1].data_id, b_atac, b_chip)
-        processed.extend([datasets[0].data_id, datasets[1].data_id])
-
-    return BatchScanResponse(session_id=session_id, datasets=processed)
-
-@app.get("/download-top-hits/{data_id}")
-async def download_top_hits(data_id: str, label: str | None = None):
-    file_path = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Top hits file not found")
-
-    safe_label = label or data_id  # fallback if label not provided
-    filename = f"{safe_label}_top_hits.tsv"
-
-    return FileResponse(
-        file_path,
-        media_type="text/tab-separated-values",
-        filename=filename,
+    job = q.enqueue(
+        filter_score_batch_task,
+        session_id, mode,
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="3600",
     )
+    return {"job_id": job.get_id()}
 
-# --- Batch zip of all top_hits in the session ---
-@app.get("/download-top-hits-batch")
-def download_top_hits_batch(session_id: str):
-    datasets = _load_session(session_id)
-    if not datasets:
-        raise HTTPException(status_code=404, detail="Unknown or empty session_id")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        added_any = False
-        for ds in datasets:
-            data_id = ds.data_id
-            p = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
-            if os.path.exists(p):
-                # Name each file clearly inside the zip; fall back to data_id
-                inner_name = f"{getattr(ds, 'label', data_id)}_top_hits.tsv"
-                zf.write(p, arcname=inner_name)
-                added_any = True
-
-    if not added_any:
-        raise HTTPException(status_code=404, detail="No top_hits files found for this session.")
-
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="top_hits_{session_id}.zip"'
-        },
+@app.post("/plot-filtered-overview")
+async def plot_filtered_overview_enqueue(
+    chip: str = Form("false"),
+    atac: str = Form("false"),
+    window: int = Form(500),
+    use_hit_number: str = Form("false"),
+    use_match_score: str = Form("false"),
+    chosen_motif: str = Form(""),
+    best_transcript: str = Form("false"),
+    data_id: str = Form(...),
+    per_motif_pvals_json: str = Form(default=""),
+    download: str = Form("false"),
+):
+    job = q.enqueue(
+        plot_filtered_single_task,
+        data_id,
+        chip.lower()=="true",
+        atac.lower()=="true",
+        window,
+        use_hit_number.lower()=="true",
+        use_match_score.lower()=="true",
+        (chosen_motif or None),
+        best_transcript.lower()=="true",
+        per_motif_pvals_json,
+        download.lower() in ("true","1","csv"),
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="3600",
     )
+    return {"job_id": job.get_id()}
 
-def load_filtered_hits(data_id: str, modality: str) -> pd.DataFrame:
-    # normalize kind
-    kind = modality.lower()
-    if kind not in {"atac","chip"}:
-        raise ValueError(f"Unknown kind {kind}")
+@app.get("/plots/filtered/{data_id}")
+def fetch_filtered_overview(data_id: str):
+    try:
+        fig = json.load(open(os.path.join(TMP_DIR, f"{data_id}_filtered_overview.json")))
+        ordered = json.load(open(os.path.join(TMP_DIR, f"{data_id}_filtered_ordered.json")))
+        final_hits = json.load(open(os.path.join(TMP_DIR, f"{data_id}_filtered_final_hits.json")))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifacts not ready")
+    return {"overview_plot": fig, "data_id": data_id, "peak_list": ordered, "final_hits": final_hits}
 
-    p = os.path.join(TMP_DIR, f"{data_id}_{modality}_filt_hits.pkl")
-    if not os.path.exists(p):
-        raise FileNotFoundError(f"Missing filtered hits: {p}")
-
-    df = pd.read_pickle(p)
-    # sanity: ensure expected cols exist
-    required = {"Peak_ID","Motif"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"{p} missing columns: {missing}")
-
-    return df
-
-@app.post("/plot-filtered-overview-compare", response_model=ComparePlotResponse)
-async def plot_filtered_overview_compare(
+@app.get("/download/filtered/{data_id}")
+def download_filtered_csv(data_id: str):
+    fp = os.path.join(TMP_DIR, f"{data_id}_filtered_final_hits.csv")
+    if not os.path.exists(fp):
+        raise HTTPException(status_code=404, detail="CSV not found (did you request download?)")
+    return Response(open(fp,"rb").read(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename=\"{data_id}_filtered_final_hits.csv\"'})
+@app.post("/plot-filtered-overview-compare")
+async def plot_filtered_overview_compare_enqueue(
     session_id: str = Form(...),
     window: int = Form(500),
     chip: str = Form("false"),
@@ -789,191 +653,59 @@ async def plot_filtered_overview_compare(
     use_hit_number: str = Form("false"),
     use_match_score: str = Form("false"),
     chosen_motif: str = Form(""),
-    best_transcript: bool = Form("false"),
-    per_motif_pvals_json: str = Form(default=""),
-    download: str = Form("false"),               # ← NEW
-    merge: str = Form("true"), 
-):
-    chip            = chip.lower() == "true"
-    atac            = atac.lower() == "true"
-    use_hit_number  = use_hit_number.lower() == "true"
-    use_match_score = use_match_score.lower() == "true"
-    merge_files     = merge.lower() in ("true", "1", "yes")
-    datasets = _load_session(session_id)
-
-    try:
-        motif_list = pd.read_pickle(f"{TMP_DIR}/{session_id}_motif_list.pkl")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cached motif_list for this session")
-
-    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
-
-    figures: Dict[str, str] = {}
-    ordered: Dict[str, List[str]] = {}
-    final_hits: Dict[str, List[Dict[str, Any]]] = {}   # NEW
-    dfs_by_label: Dict[str, pd.DataFrame] = {}   # for file responses
-
-    for ds in datasets:
-        data_id = ds.data_id
-        label   = ds.label
-
-        try:
-            peaks_df = pd.read_pickle(f"{TMP_DIR}/{data_id}_peaks.pkl")
-            gene_lfc = pd.read_pickle(f"{TMP_DIR}/{data_id}_genes_lfc.pkl")
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Missing cached genomic data for {label}")
-
-        # Choose which hits table to plot
-        if not (chip or atac):
-            try:
-                df_to_plot = pd.read_pickle(f"{TMP_DIR}/{data_id}_df_hits.pkl")
-            except FileNotFoundError:
-                raise HTTPException(status_code=404, detail=f"No cached df_hits for {label}")
-        else:
-            dfs = []
-            if chip: dfs.append(load_filtered_hits(data_id, "chip"))
-            if atac: dfs.append(load_filtered_hits(data_id, "atac"))
-            df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
-            
-        peak_ranks = rank_peaks_for_plot(
-            df_hits=df_to_plot,
-            gene_lfc=gene_lfc,
-            peaks_df=peaks_df,
-            use_hit_number=use_hit_number,
-            use_match_score=use_match_score,
-            motif=(chosen_motif or None),
-            best_transcript = best_transcript,
-            min_score_bits=0.0,
-            per_motif_pvals=per_motif_pvals,
-        )
-
-        fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
-            peak_list=list(peak_ranks.keys()),
-            peaks_df=peaks_df,
-            motif_list=motif_list,
-            df_hits=df_to_plot,
-            window=window,
-            peak_rank=peak_ranks,
-            title=f"Motif hits - {label}",
-            min_score_bits=0.0,
-            per_motif_pvals=per_motif_pvals,
-        )
-
-        figures[label] = fig.to_json()
-        ordered[label] = ordered_peaks
-        final_hits[label] = _df_to_records_json_safe(final_hits_df)   # NEW
-        dfs_by_label[label] = final_hits_df
-
-    # If download requested, return CSV/ZIP instead of JSON:
-    if download.lower() in ("true", "1", "csv", "zip"):
-        if merge_files:
-            merged = []
-            for label, df in dfs_by_label.items():
-                df2 = df.copy()
-                df2.insert(0, "Dataset", label)
-                merged.append(df2)
-            merged_df = pd.concat(merged, ignore_index=True) if merged else pd.DataFrame()
-            csv_bytes = _df_to_csv_bytes(merged_df)
-            filename = f"{session_id}_final_hits_merged.csv"
-            return Response(
-                content=csv_bytes,
-                media_type="text/csv",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-            )
-        else:
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
-                for label, df in dfs_by_label.items():
-                    z.writestr(f"{label}_final_hits.csv", _df_to_csv_bytes(df))
-            zip_buf.seek(0)
-            filename = f"{session_id}_final_hits.zip"
-            return StreamingResponse(
-                zip_buf,
-                media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-            )
-
-    # default: JSON as before
-    return ComparePlotResponse(session_id=session_id, figures=figures, ordered_peaks=ordered, final_hits=final_hits)
-
-
-
-@app.post("/plot-filtered-overview", response_model=PlotOverviewResponse)
-async def plot_filtered_overview(
-    request: Request,
-    chip: str = Form("false"),
-    atac: str = Form("false"),
-    window: int = Form(500),
-    use_hit_number: str = Form("false"),
-    use_match_score: str = Form("false"),
-    chosen_motif: str = Form(...),
     best_transcript: str = Form("false"),
-    data_id: str = Form(...),
     per_motif_pvals_json: str = Form(default=""),
-    download: str = Form("false"),  
+    download: str = Form("false"),
+    merge: str = Form("true"),
 ):
-    chip            = chip.lower() == "true"
-    atac            = atac.lower() == "true"
-    use_hit_number  = use_hit_number.lower() == "true"
-    use_match_score = use_match_score.lower() == "true"
+    job = q.enqueue(
+        plot_filtered_compare_task,
+        session_id,
+        window,
+        chip.lower()=="true",
+        atac.lower()=="true",
+        use_hit_number.lower()=="true",
+        use_match_score.lower()=="true",
+        (chosen_motif or None),
+        best_transcript.lower()=="true",
+        per_motif_pvals_json,
+        download.lower() in ("true","1","csv","zip"),
+        merge.lower() in ("true","1","yes"),
+        retry=Retry(max=3, interval=[10,30,60]),
+        job_timeout="7200",
+    )
+    return {"job_id": job.get_id()}
 
-    try:
-        peaks_df   = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_peaks.pkl"))
-        gene_lfc   = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"))
-        motif_list = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_motif_list.pkl"))
-    except FileNotFoundError:
-        raise HTTPException(404, "No cached genomic data for given data_id")
+@app.get("/plots/filtered-compare/{session_id}")
+def fetch_filtered_overview_compare(session_id: str):
+    from glob import glob
+    files = glob(os.path.join(TMP_DIR, f"{session_id}_*_filtered_overview.json"))
+    if not files:
+        raise HTTPException(status_code=404, detail="Artifacts not ready")
+    figures, ordered, final_hits = {}, {}, {}
+    for fp in files:
+        fname = os.path.basename(fp)
+        label = fname[len(session_id)+1:].replace("_filtered_overview.json", "")
+        figures[label] = json.load(open(fp))
+        ordered[label] = json.load(open(os.path.join(TMP_DIR, f"{session_id}_{label}_filtered_ordered.json")))
+        final_hits[label] = json.load(open(os.path.join(TMP_DIR, f"{session_id}_{label}_filtered_final_hits.json")))
+    return {"session_id": session_id, "figures": figures, "ordered_peaks": ordered, "final_hits": final_hits}
 
-    if not (chip or atac):
-        df_to_plot = pd.read_pickle(os.path.join(TMP_DIR, f"{data_id}_df_hits.pkl"))
+@app.get("/download/filtered-compare/{session_id}")
+def download_filtered_compare(session_id: str, merged: bool = True):
+    if merged:
+        fp = os.path.join(TMP_DIR, f"{session_id}_filtered_final_hits_merged.csv")
+        if not os.path.exists(fp):
+            raise HTTPException(status_code=404, detail="Merged CSV not found (did you request merge+download?)")
+        return Response(open(fp,"rb").read(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename=\"{session_id}_filtered_final_hits_merged.csv\"'})
     else:
-        dfs = []
-        if chip:
-            dfs.append(load_filtered_hits(data_id, "chip"))
-        if atac:
-            dfs.append(load_filtered_hits(data_id, "atac"))
-        df_to_plot = reduce(lambda L, R: pd.merge(L, R, how="inner"), dfs) if len(dfs) > 1 else dfs[0]
+        fp = os.path.join(TMP_DIR, f"{session_id}_filtered_final_hits.zip")
+        if not os.path.exists(fp):
+            raise HTTPException(status_code=404, detail="ZIP not found (did you request split+download?)")
+        return Response(open(fp,"rb").read(), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename=\"{session_id}_filtered_final_hits.zip\"'})
 
-    per_motif_pvals = _parse_per_motif_pvals(per_motif_pvals_json)
-
-    peak_ranks = rank_peaks_for_plot(
-        df_hits=df_to_plot,
-        gene_lfc=gene_lfc,
-        peaks_df=peaks_df,
-        use_hit_number=use_hit_number,
-        use_match_score=use_match_score,
-        motif=chosen_motif,
-        best_transcript = best_transcript,
-        min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,
-    )
-
-    fig, ordered_peaks, final_hits_df = plot_occurrence_overview_plotly(
-        peak_list=list(peak_ranks.keys()),
-        peaks_df=peaks_df,
-        motif_list=motif_list,
-        df_hits=df_to_plot,
-        window=window,
-        peak_rank=peak_ranks,
-        title="Motif hits",
-        min_score_bits=0.0,
-        per_motif_pvals=per_motif_pvals,
-    )
-
-    # If the client asked for a file, return a CSV instead of JSON:
-    if download.lower() in ("true", "1", "csv"):
-        csv_bytes = _df_to_csv_bytes(final_hits_df)
-        filename = f"{data_id}_final_hits.csv"
-        return Response(
-            content=csv_bytes,
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-
-    # Default: JSON as before
-    fig_json = fig.to_json()
-    final_hits_records = _df_to_records_json_safe(final_hits_df)
-    return {"overview_plot": fig_json, "data_id": data_id, "peak_list": ordered_peaks, "final_hits": final_hits_records}
 
 @app.post("/plot-chip-overlay")
 async def plot_chip_overlay_json(

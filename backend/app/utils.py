@@ -1,8 +1,21 @@
-import numpy as np, io
+import numpy as np, io, os, shutil
 from typing import List, Dict, Tuple, Optional, Any
 import json
 import pandas as pd
-
+TMP_DIR = "tmp"
+def clear_tmp_dir():
+    if os.path.isdir(TMP_DIR):
+        for name in os.listdir(TMP_DIR):
+            path = os.path.join(TMP_DIR, name)
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.unlink(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+            except Exception as e:
+                print(f"Couldn't remove {path}: {e}")
+    else:
+        os.makedirs(TMP_DIR, exist_ok=True)
 def _df_to_records_json_safe(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Convert DataFrame to a JSON-safe list[dict] (NaNs -> None)."""
     if df is None or df.empty:

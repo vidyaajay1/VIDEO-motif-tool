@@ -34,15 +34,44 @@ const DEFAULT_FILTERS: FilterSettings = {
 };
 
 const ENDPOINTS = {
-  validateSingle: (base: string) => `${base}/validate-motifs`,
-  validateCompare: (base: string) => `${base}/validate-motifs-group`,
-  overviewSingle: (base: string) => `${base}/plot-motif-overview`,
-  overviewCompare: (base: string) => `${base}/plot-motif-overview-compare`,
-  filteredSingle: (base: string) => `${base}/plot-filtered-overview`,
-  filteredCompare: (base: string) => `${base}/plot-filtered-overview-compare`,
   getGenomicSingle: (base: string) => `${base}/get-genomic-input`,
   getGenomicCompare: (base: string) => `${base}/get-genomic-input-compare`,
-  getHitsBatch: (base: string) => `${base}/get-motif-hits-batch`,
+  // enqueue
+  validateSingle: (base: string) => `${base}/validate-motifs`,
+  validateCompare: (base: string) => `${base}/validate-motifs-group`,
+
+  overviewSingle: (base: string) => `${base}/plot-motif-overview`, // returns {job_id}
+  overviewCompare: (base: string) => `${base}/plot-motif-overview-compare`, // returns {job_id}
+  filteredSingle: (base: string) => `${base}/plot-filtered-overview`, // returns {job_id}
+  filteredCompare: (base: string) => `${base}/plot-filtered-overview-compare`, // returns {job_id}
+  getHitsBatch: (base: string) => `${base}/get-motif-hits-batch`, // returns {job_id}
+
+  // job status
+  jobStatus: (base: string, id: string) => `${base}/jobs/${id}`,
+
+  // fetch artifacts
+  fetchOverviewSingle: (base: string, dataId: string) =>
+    `${base}/plots/overview/${dataId}`,
+  fetchOverviewCompare: (base: string, sessionId: string) =>
+    `${base}/plots/overview-compare/${sessionId}`,
+  fetchFilteredSingle: (base: string, dataId: string) =>
+    `${base}/plots/filtered/${dataId}`,
+  fetchFilteredCompare: (base: string, sessionId: string) =>
+    `${base}/plots/filtered-compare/${sessionId}`,
+
+  // downloads
+  dlOverviewSingle: (base: string, dataId: string) =>
+    `${base}/download/overview/${dataId}`,
+  dlOverviewCompareMerged: (base: string, sessionId: string) =>
+    `${base}/download/overview-compare/${sessionId}?merged=true`,
+  dlOverviewCompareZip: (base: string, sessionId: string) =>
+    `${base}/download/overview-compare/${sessionId}?merged=false`,
+  dlFilteredSingle: (base: string, dataId: string) =>
+    `${base}/download/filtered/${dataId}`,
+  dlFilteredCompareMerged: (base: string, sessionId: string) =>
+    `${base}/download/filtered-compare/${sessionId}?merged=true`,
+  dlFilteredCompareZip: (base: string, sessionId: string) =>
+    `${base}/download/filtered-compare/${sessionId}?merged=false`,
 };
 
 async function postJSON(url: string, fd: FormData) {
@@ -54,6 +83,32 @@ async function postBlob(url: string, fd: FormData) {
   const res = await fetch(url, { method: "POST", body: fd });
   if (!res.ok) throw new Error(await res.text());
   return res.blob();
+}
+async function getJSON(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitForJob(
+  jobId: string,
+  opts?: { timeoutMs?: number; intervalMs?: number }
+) {
+  const timeoutMs = opts?.timeoutMs ?? 10 * 60 * 1000; // 10 minutes
+  const intervalMs = opts?.intervalMs ?? 1500;
+  const start = Date.now();
+  while (true) {
+    const js = await getJSON(ENDPOINTS.jobStatus(API_BASE, jobId));
+    if (js.status === "finished") return js;
+    if (js.status === "failed") throw new Error(js.error || "Job failed");
+    if (Date.now() - start > timeoutMs)
+      throw new Error("Timed out waiting for job");
+    await sleep(intervalMs);
+  }
 }
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5;
@@ -305,13 +360,20 @@ function MotifViewer() {
         const fd = new FormData();
         fd.append("session_id", sessionId);
         fd.append("window", String(inputWindow));
-        const json = await postJSON(ENDPOINTS.overviewCompare(API_BASE), fd);
+        const { job_id } = await postJSON(
+          ENDPOINTS.overviewCompare(API_BASE),
+          fd
+        );
+        await waitForJob(job_id);
+        const json = await getJSON(
+          ENDPOINTS.fetchOverviewCompare(API_BASE, sessionId)
+        );
         setOverviewFiguresByLabel(json.figures || {});
         setFilteredFiguresByLabel({});
-        const map: OrderedPeaksByLabel = {};
+        const map: Record<string, string[]> = {};
         if (json.ordered_peaks && typeof json.ordered_peaks === "object") {
           for (const [label, arr] of Object.entries(json.ordered_peaks)) {
-            map[label] = Array.isArray(arr) ? arr.map(String) : [];
+            map[label] = Array.isArray(arr) ? (arr as any[]).map(String) : [];
           }
         }
         setOrderedPeaksByLabel(map);
@@ -323,8 +385,14 @@ function MotifViewer() {
       appendMotifsToForm(fd);
       fd.append("window", String(inputWindow));
       fd.append("data_id", dataId);
-      const json = await postJSON(ENDPOINTS.overviewSingle(API_BASE), fd);
-      setOverviewFigureJson(json.overview_plot ?? null);
+      const { job_id } = await postJSON(ENDPOINTS.overviewSingle(API_BASE), fd);
+      await waitForJob(job_id);
+      const json = await getJSON(
+        ENDPOINTS.fetchOverviewSingle(API_BASE, dataId)
+      );
+      setOverviewFigureJson(
+        json.overview_plot ? JSON.stringify(json.overview_plot) : null
+      );
       setFilteredOverviewFigureJson(null);
       setLastFilters((prev) => prev ?? DEFAULT_FILTERS);
     } catch (e: any) {
@@ -342,7 +410,8 @@ function MotifViewer() {
         fd.append("session_id", sessionId);
         fd.append("window", String(inputWindow));
         fd.append("fimo_threshold", "0.005");
-        await postJSON(ENDPOINTS.getHitsBatch(API_BASE), fd);
+        const { job_id } = await postJSON(ENDPOINTS.getHitsBatch(API_BASE), fd);
+        await waitForJob(job_id);
       }
       await handleMotifOverview();
       setScanVersion((v) => v + 1);
@@ -384,16 +453,24 @@ function MotifViewer() {
     const inCompare = isCompare;
     try {
       const fd = buildFormDataFromFilters(filters, inCompare);
-      const json = await postJSON(
-        inCompare
-          ? ENDPOINTS.filteredCompare(API_BASE)
-          : ENDPOINTS.filteredSingle(API_BASE),
-        fd
-      );
+      const enqueueUrl = inCompare
+        ? ENDPOINTS.filteredCompare(API_BASE)
+        : ENDPOINTS.filteredSingle(API_BASE);
+      const { job_id } = await postJSON(enqueueUrl, fd);
+      await waitForJob(job_id);
+
+      const fetchUrl = inCompare
+        ? ENDPOINTS.fetchFilteredCompare(API_BASE, sessionId!)
+        : ENDPOINTS.fetchFilteredSingle(API_BASE, dataId!);
+      const json = await getJSON(fetchUrl);
+
       if (inCompare) {
         setFilteredFiguresByLabel(json.figures || {});
       } else {
-        setFilteredOverviewFigureJson(json.overview_plot ?? null);
+        // keep it as string if your plot component expects string
+        setFilteredOverviewFigureJson(
+          json.overview_plot ? JSON.stringify(json.overview_plot) : null
+        );
       }
     } catch (e: any) {
       alert(e.message || String(e));
@@ -406,15 +483,27 @@ function MotifViewer() {
       return alert("Apply filters at least once before downloading.");
     const inCompare = isCompare;
     try {
+      // enqueue a “download build” if your worker only writes CSV/ZIP when asked
       const fd = buildFormDataFromFilters(lastFilters, inCompare);
       fd.set("download", "true");
       if (inCompare) fd.set("merge", String(!!merge));
-      const blob = await postBlob(
-        inCompare
-          ? ENDPOINTS.filteredCompare(API_BASE)
-          : ENDPOINTS.filteredSingle(API_BASE),
-        fd
-      );
+      const enqueueUrl = inCompare
+        ? ENDPOINTS.filteredCompare(API_BASE)
+        : ENDPOINTS.filteredSingle(API_BASE);
+      const { job_id } = await postJSON(enqueueUrl, fd);
+      await waitForJob(job_id);
+
+      // now fetch the ready-made file
+      const dlUrl = inCompare
+        ? merge
+          ? ENDPOINTS.dlFilteredCompareMerged(API_BASE, sessionId!)
+          : ENDPOINTS.dlFilteredCompareZip(API_BASE, sessionId!)
+        : ENDPOINTS.dlFilteredSingle(API_BASE, dataId!);
+
+      const res = await fetch(dlUrl);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -422,7 +511,7 @@ function MotifViewer() {
         ? merge
           ? `${sessionId ?? "motif_hits"}_merged.csv`
           : `${sessionId ?? "motif_hits"}.zip`
-        : `${dataId ?? "motif_hits"}.csv`;
+        : `${dataId ?? "motif_hits"}_filtered.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {

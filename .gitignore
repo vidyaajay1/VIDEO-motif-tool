@@ -35,3 +35,7 @@ backend/app/
 backend/app/static
 *.svg
 backend/.venv/
+
+# Redis dump files
+dump.rdb
+appendonly.aof

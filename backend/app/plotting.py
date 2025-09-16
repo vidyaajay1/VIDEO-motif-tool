@@ -125,55 +125,6 @@ def rank_peaks_for_plot(
         clustered_ids.extend(fb_sorted.loc[fb_sorted["gene"] == g, "Peak_ID"].tolist())
     return {pid: i + 1 for i, pid in enumerate(clustered_ids)}
 
-'''
-def rank_peaks_for_plot_TSSs_SEPARATE(
-    df_hits: pd.DataFrame,
-    gene_lfc: Dict[str, float],
-    peaks_df: pd.DataFrame,
-    use_hit_number: bool,
-    use_match_score: bool,
-    motif: Optional[str],
-    min_score_bits: float = 0.0,
-    per_motif_pvals: Optional[Dict[str, float]] = None,   # NEW
-) -> Dict[str, int]:
-    gene_from_peak = peaks_df["Peak_ID"].str.split("_FBtr").str[0]
-
-    # NEW: per-motif p-value filter first
-    df_hits = filter_hits_by_per_motif_pvals(df_hits, per_motif_pvals)
-
-    if motif is None or not (use_hit_number or use_match_score):
-        fb = pd.DataFrame({"Peak_ID": peaks_df["Peak_ID"], "gene": gene_from_peak})
-        fb["metric"] = fb["gene"].map(lambda g: gene_lfc.get(g, 0.0)).clip(lower=0.0)
-        fb_sorted = fb.sort_values("metric", ascending=False, kind="mergesort")
-    else:
-        df_m = df_hits[df_hits["Motif"] == motif].copy()
-        df_m = df_m[df_m["Score_bits"] > min_score_bits]  # keep your bits gate
-
-        if df_m.empty:
-            return rank_peaks_for_plot(
-                df_hits, gene_lfc, peaks_df,
-                use_hit_number=False, use_match_score=False, motif=None
-            )
-
-        agg = {}
-        if use_hit_number:
-            agg["hit_count"] = ("Peak_ID", "size")
-        if use_match_score:
-            agg["metric"] = ("Score_bits", "sum" if use_hit_number else "max")
-
-        metrics = df_m.groupby("Peak_ID").agg(**agg)
-        if "metric" not in metrics:
-            metrics["metric"] = metrics["hit_count"]
-
-        fb = pd.DataFrame({"Peak_ID": peaks_df["Peak_ID"]})
-        fb = fb.merge(metrics[["metric"]].reset_index(), on="Peak_ID", how="left").fillna(0.0)
-        fb["metric"] = fb["metric"].clip(lower=0.0)
-        fb["fallback"] = gene_from_peak.map(lambda g: abs(gene_lfc.get(g, 0.0)))
-        fb_sorted = fb.sort_values(by=["metric", "fallback"], ascending=[False, False], kind="mergesort")
-
-    return {pid: i+1 for i, pid in enumerate(fb_sorted["Peak_ID"])}'''
-
-
 # --- 4) Plotly figure builder -------------------------------------------------
 def _rgba_with_alpha(col: str, alpha: float) -> str:
     r, g, b, _ = to_rgba(col)
@@ -312,7 +263,7 @@ def plot_occurrence_overview_plotly(
                 alignmentgroup="peaks", width=0.8,
             )
     else:
-        fig.add_annotation(text="No motif hits pass the per-motif p-value filter.",
+        fig.add_annotation(text="No motif hits pass the set filters.",
                            showarrow=False, x=0.5, y=1.02, xref="paper", yref="paper")
 
     # Midline and layout

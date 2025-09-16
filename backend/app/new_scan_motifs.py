@@ -6,6 +6,35 @@ from pyfaidx import Fasta
 from app.new_process_input import Motif
 
 FIMO_PATH = "/home/ec2-user/miniconda3/envs/memesuite/bin/fimo"
+
+FIMO_ENV_VARS = ("VIDEO_FIMO_PATH", "FIMO_PATH")  # allow either
+
+def resolve_fimo_exe() -> str:
+    # 1) explicit env var override
+    for var in FIMO_ENV_VARS:
+        p = os.getenv(var)
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+
+    # 2) whatever is on PATH
+    exe = shutil.which("fimo")
+    if exe:
+        return exe
+
+    # 3) last-ditch: a few common install locations
+    candidates = [
+        "/home/ec2-user/miniconda3/envs/memesuite/bin/fimo",
+        "/opt/local/bin/fimo",  #my mac's fimo path
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+
+    raise RuntimeError(
+        "FIMO binary not found. Install MEME Suite (e.g., conda install -c bioconda meme) "
+        "or set VIDEO_FIMO_PATH/FIMO_PATH to the absolute fimo binary."
+    )
+
 #write the peaks_df to a meme-formatted txt file
 def peaks_df_to_fasta(
     peaks_df: pd.DataFrame,
@@ -94,7 +123,7 @@ def run_fimo(
     fimo_exe: Optional[str] = None,   # NEW
 ) -> pd.DataFrame:
 
-    exe = fimo_exe or shutil.which("fimo")
+    exe = fimo_exe or resolve_fimo_exe()
     if not exe:
         raise RuntimeError(
             "FIMO binary not found. Install MEME Suite (bioconda: meme) or set fimo_exe to an absolute path. "
@@ -141,7 +170,7 @@ def build_motif_hits(
         peak_lfc = peak['logFC']
         peak_len = peak['Peak Length']
         chrom     = peak['Chromosome']
-        seq0      = int(peak['Start'])      # genome‐coord of base 1 in your sequence
+        seq0      = int(peak['Start'])      # genome‐coord of base 1 in the sequence
         # absolute genomic coords of the motif‐hit:
         abs_start = seq0 + (start - 1)
         abs_end   = seq0 + (stop  - 1)
@@ -188,7 +217,6 @@ def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list:List[Motif], fimo_
     motifs_fp = "fimo_files/motifs.txt"
     peaks_df_to_fasta(peaks_df, ref_fasta, fasta_fp, window_size)
     motif_to_memefile(motif_list, motifs_fp)
-    #fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold)
-    fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold, fimo_exe=FIMO_PATH)
+    fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold)
     motif_hits, df_hits = build_motif_hits(fimo_tsv, peaks_df, motif_list)
     return motif_hits, df_hits
