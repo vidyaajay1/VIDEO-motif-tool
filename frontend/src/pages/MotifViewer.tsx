@@ -1,7 +1,7 @@
 // MotifViewer.tsx
 import React, { useState, useEffect } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
-import { Container, Card, Nav, Spinner, Button } from "react-bootstrap";
+import { Container, Card, Nav, Spinner, Button, Alert } from "react-bootstrap";
 
 import GenomicInput from "../components/GenomicInput";
 import GetMotifInput from "../components/GetMotifInput";
@@ -32,7 +32,7 @@ const DEFAULT_FILTERS: FilterSettings = {
   bestTranscript: false,
   perMotifPvals: {},
 };
-
+export type PlotlyJSON = { data: any[]; layout: any; config?: any };
 const ENDPOINTS = {
   getGenomicSingle: (base: string) => `${base}/get-genomic-input`,
   getGenomicCompare: (base: string) => `${base}/get-genomic-input-compare`,
@@ -44,6 +44,7 @@ const ENDPOINTS = {
   overviewCompare: (base: string) => `${base}/plot-motif-overview-compare`, // returns {job_id}
   filteredSingle: (base: string) => `${base}/plot-filtered-overview`, // returns {job_id}
   filteredCompare: (base: string) => `${base}/plot-filtered-overview-compare`, // returns {job_id}
+  getHitsSingle: (base: string) => `${base}/get-motif-hits`,
   getHitsBatch: (base: string) => `${base}/get-motif-hits-batch`, // returns {job_id}
 
   // job status
@@ -96,18 +97,26 @@ async function sleep(ms: number) {
 
 async function waitForJob(
   jobId: string,
-  opts?: { timeoutMs?: number; intervalMs?: number }
+  opts?: { interval?: number; timeoutMs?: number }
 ) {
-  const timeoutMs = opts?.timeoutMs ?? 10 * 60 * 1000; // 10 minutes
-  const intervalMs = opts?.intervalMs ?? 1500;
+  const interval = opts?.interval ?? 1000;
+  const timeoutMs = opts?.timeoutMs ?? 15 * 60 * 1000; // 15 min
   const start = Date.now();
+  let backoff = interval;
+
   while (true) {
-    const js = await getJSON(ENDPOINTS.jobStatus(API_BASE, jobId));
-    if (js.status === "finished") return js;
-    if (js.status === "failed") throw new Error(js.error || "Job failed");
-    if (Date.now() - start > timeoutMs)
-      throw new Error("Timed out waiting for job");
-    await sleep(intervalMs);
+    const { status, error } = await getJSON(
+      ENDPOINTS.jobStatus(API_BASE, jobId)
+    );
+
+    if (status === "finished") return;
+    if (status === "failed") throw new Error(error || "Job failed");
+
+    if (Date.now() - start > timeoutMs) throw new Error("Job timed out");
+
+    // simple exponential backoff cap
+    await new Promise((r) => setTimeout(r, backoff));
+    backoff = Math.min(backoff * 1.5, 4000);
   }
 }
 
@@ -187,18 +196,37 @@ function MotifViewer() {
   const [filteredOverviewFigureJson, setFilteredOverviewFigureJson] = useState<
     string | null
   >(null);
-  const [overviewFiguresByLabel, setOverviewFiguresByLabel] = useState<
-    Record<string, string>
-  >({});
-  const [filteredFiguresByLabel, setFilteredFiguresByLabel] = useState<
-    Record<string, string>
+  const [overviewFiguresByLabel, setOverviewFiguresByLabel] = React.useState<
+    Record<string, PlotlyJSON>
   >({});
 
+  const [filteredFiguresByLabel, setFilteredFiguresByLabel] = React.useState<
+    Record<string, PlotlyJSON>
+  >({});
   // Ordered peaks (used by overlay compare)
   type OrderedPeaksByLabel = Record<string, string[]>;
   const [orderedPeaksByLabel, setOrderedPeaksByLabel] =
     useState<OrderedPeaksByLabel>({});
+  type PeakOrderInput = Record<string, any>; // from backend
+  type PeakListByLabel = Record<string, string[]>; // what child needs
 
+  function normalizeOrderedPeaks(inp: PeakOrderInput): PeakListByLabel {
+    const out: PeakListByLabel = {};
+    for (const [label, val] of Object.entries(inp)) {
+      if (Array.isArray(val)) {
+        // already a list of peaks
+        out[label] = val as string[];
+      } else if (val && typeof val === "object") {
+        // assume {peakId: rank} → sort by rank to get a list
+        out[label] = Object.entries(val)
+          .sort(([, r1], [, r2]) => (Number(r1) || 0) - (Number(r2) || 0))
+          .map(([peakId]) => peakId);
+      } else {
+        out[label] = [];
+      }
+    }
+    return out;
+  }
   // Persist a scan version (used by children props)
   const [scanVersion, setScanVersion] = useState<number>(() => {
     const saved = sessionStorage.getItem("motifViewer.scanVersion");
@@ -352,54 +380,6 @@ function MotifViewer() {
     }
   };
 
-  // Overview (unfiltered)
-  const handleMotifOverview = async () => {
-    try {
-      if (isCompare) {
-        if (!sessionId) throw new Error("Missing session_id");
-        const fd = new FormData();
-        fd.append("session_id", sessionId);
-        fd.append("window", String(inputWindow));
-        const { job_id } = await postJSON(
-          ENDPOINTS.overviewCompare(API_BASE),
-          fd
-        );
-        await waitForJob(job_id);
-        const json = await getJSON(
-          ENDPOINTS.fetchOverviewCompare(API_BASE, sessionId)
-        );
-        setOverviewFiguresByLabel(json.figures || {});
-        setFilteredFiguresByLabel({});
-        const map: Record<string, string[]> = {};
-        if (json.ordered_peaks && typeof json.ordered_peaks === "object") {
-          for (const [label, arr] of Object.entries(json.ordered_peaks)) {
-            map[label] = Array.isArray(arr) ? (arr as any[]).map(String) : [];
-          }
-        }
-        setOrderedPeaksByLabel(map);
-        return;
-      }
-      // single
-      if (!dataId) throw new Error("Missing data_id");
-      const fd = new FormData();
-      appendMotifsToForm(fd);
-      fd.append("window", String(inputWindow));
-      fd.append("data_id", dataId);
-      const { job_id } = await postJSON(ENDPOINTS.overviewSingle(API_BASE), fd);
-      await waitForJob(job_id);
-      const json = await getJSON(
-        ENDPOINTS.fetchOverviewSingle(API_BASE, dataId)
-      );
-      setOverviewFigureJson(
-        json.overview_plot ? JSON.stringify(json.overview_plot) : null
-      );
-      setFilteredOverviewFigureJson(null);
-      setLastFilters((prev) => prev ?? DEFAULT_FILTERS);
-    } catch (e: any) {
-      alert(e.message || String(e));
-    }
-  };
-
   // After scan is finished
   const onFinishedScan = async () => {
     setScanComplete(true);
@@ -409,16 +389,25 @@ function MotifViewer() {
         const fd = new FormData();
         fd.append("session_id", sessionId);
         fd.append("window", String(inputWindow));
-        fd.append("fimo_threshold", "0.005");
+        fd.append("fimo_threshold", String(fimoThreshold ?? 0.005));
         const { job_id } = await postJSON(ENDPOINTS.getHitsBatch(API_BASE), fd);
         await waitForJob(job_id);
       }
-      await handleMotifOverview();
+      // REMOVE this line so plots are only generated when user clicks:
+      // await handleMotifOverview();
+
       setScanVersion((v) => v + 1);
     } catch (e: any) {
       alert(e.message || String(e));
     }
   };
+  const [hasATAC, setHasATAC] = useState(false);
+  const [hasChIP, setHasChIP] = useState(false);
+  // if you want to hard-reset availability when a new scan version starts:
+  useEffect(() => {
+    setHasATAC(false);
+    setHasChIP(false);
+  }, [scanVersion, isCompare, dataId, sessionId]);
 
   // Build filters → FormData (reused)
   function buildFormDataFromFilters(
@@ -465,9 +454,12 @@ function MotifViewer() {
       const json = await getJSON(fetchUrl);
 
       if (inCompare) {
+        // figures are already objects
         setFilteredFiguresByLabel(json.figures || {});
+
+        // also populate ordered peaks for the Step 5 overlay
+        setOrderedPeaksByLabel(normalizeOrderedPeaks(json.ordered_peaks || {}));
       } else {
-        // keep it as string if your plot component expects string
         setFilteredOverviewFigureJson(
           json.overview_plot ? JSON.stringify(json.overview_plot) : null
         );
@@ -699,6 +691,11 @@ Enter a name and choose a color for each motif.`}
                   scanVersion={scanVersion}
                   onDone={() => {}}
                   onError={alert}
+                  // NEW
+                  onDataAvailabilityChange={({ hasATAC, hasChIP }) => {
+                    setHasATAC(hasATAC);
+                    setHasChIP(hasChIP);
+                  }}
                 />
               ) : (
                 <GetFilterData
@@ -709,16 +706,26 @@ Enter a name and choose a color for each motif.`}
                     setFilteredOverviewFigureJson(figureJson);
                   }}
                   onError={alert}
+                  // NEW
+                  onDataAvailabilityChange={({ hasATAC, hasChIP }) => {
+                    setHasATAC(hasATAC);
+                    setHasChIP(hasChIP);
+                  }}
                 />
               ))}
 
             {activeStep === 4 && (
               <>
+                <h4 className="text-center mb-3 mt-3">
+                  Motif Occurence Overview
+                </h4>
                 {isCompare ? (
                   <>
                     <FiltersBar
                       motifList={validatedMotifNames}
                       fimoThreshold={fimoThreshold}
+                      allowOpenChromatin={hasATAC} // ✅ wire availability
+                      allowBindingPeaks={hasChIP}
                       onApply={(f: FilterSettings) =>
                         fetchFilteredPlot({
                           openChromatin: f.openChromatin,
@@ -759,49 +766,59 @@ Enter a name and choose a color for each motif.`}
                     />
                   </>
                 ) : (
-                  <MotifOccurencePlot
-                    figureJson={
-                      filteredOverviewFigureJson ||
-                      overviewFigureJson ||
-                      undefined
-                    }
-                    onApplyFilters={fetchFilteredPlot}
-                    motifList={validatedMotifNames}
-                  >
-                    <Button
-                      variant="outline-success"
-                      size="sm"
-                      disabled={!dataId || !lastFilters}
-                      onClick={() => downloadFiltered()}
+                  <>
+                    <FiltersBar
+                      motifList={validatedMotifNames}
+                      fimoThreshold={fimoThreshold}
+                      allowOpenChromatin={hasATAC} // ✅
+                      allowBindingPeaks={hasChIP} // ✅
+                      onApply={fetchFilteredPlot}
+                    />
+                    <MotifOccurencePlot
+                      figureJson={
+                        filteredOverviewFigureJson ||
+                        overviewFigureJson ||
+                        undefined
+                      }
+                      onApplyFilters={fetchFilteredPlot}
+                      motifList={validatedMotifNames}
                     >
-                      Download hits (CSV)
-                    </Button>
-                  </MotifOccurencePlot>
+                      <Button
+                        variant="outline-success"
+                        size="sm"
+                        disabled={!dataId || !lastFilters}
+                        onClick={() => downloadFiltered()}
+                      >
+                        Download hits (CSV)
+                      </Button>
+                    </MotifOccurencePlot>
+                  </>
                 )}
               </>
             )}
 
-            {activeStep === 5 &&
-              (isCompare ? (
+            {activeStep === 5 && isCompare ? (
+              Object.keys(orderedPeaksByLabel).length ? (
                 <BigWigOverlayCompare
                   sessionId={sessionId}
                   inputWindow={inputWindow}
                   apiBase={API_BASE}
-                  labels={
-                    Object.keys(orderedPeaksByLabel).length
-                      ? Object.keys(orderedPeaksByLabel)
-                      : [labelA, labelB].filter(Boolean)
-                  }
-                  peakListsByLabel={orderedPeaksByLabel}
+                  labels={Object.keys(orderedPeaksByLabel)} // match keys we have
+                  peakListsByLabel={orderedPeaksByLabel} // has arrays now
                 />
               ) : (
-                <BigWigOverlay
-                  dataId={dataId}
-                  inputWindow={inputWindow}
-                  peakList={peakList}
-                  apiBase={API_BASE}
-                />
-              ))}
+                <Alert variant="info">
+                  Run “Generate Plots” first to load peak lists.
+                </Alert>
+              )
+            ) : activeStep === 5 ? (
+              <BigWigOverlay
+                dataId={dataId}
+                inputWindow={inputWindow}
+                peakList={peakList}
+                apiBase={API_BASE}
+              />
+            ) : null}
           </Card.Body>
 
           {/* Navigation Buttons */}

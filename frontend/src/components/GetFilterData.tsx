@@ -9,6 +9,10 @@ export interface GetFilterDataProps {
   scanVersion: number;
   onFilteredOverview: (overviewUrl: string) => void;
   onError: (msg: string) => void;
+  onDataAvailabilityChange?: (avail: {
+    hasATAC: boolean;
+    hasChIP: boolean;
+  }) => void;
 }
 
 const GetFilterData: React.FC<GetFilterDataProps> = ({
@@ -17,6 +21,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
   scanVersion,
   onFilteredOverview,
   onError,
+  onDataAvailabilityChange,
 }) => {
   const [atacBedFile, setAtacBedFile] = useState<File | null>(null);
   const [chipBedFile, setChipBedFile] = useState<File | null>(null);
@@ -30,7 +35,14 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
   useEffect(() => {
     setFilterComplete(false);
     setShowDownload(false);
+    onDataAvailabilityChange?.({ hasATAC: false, hasChIP: false });
   }, [dataId, scanComplete, scanVersion]);
+  useEffect(() => {
+    onDataAvailabilityChange?.({
+      hasATAC: Boolean(atacBedFile),
+      hasChIP: Boolean(chipBedFile),
+    });
+  }, [atacBedFile, chipBedFile, onDataAvailabilityChange]);
   const handleFilterMotifHits = useCallback(async () => {
     if (!scanComplete || !dataId) {
       onError("Please complete motif scan first");
@@ -136,16 +148,6 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
           Motif hits have been filtered and scored!
         </div>
       )}
-      {/*
-      {filterComplete && dataId && (
-        <a
-          href={`${API_BASE}/download-top-hits/${dataId}`}
-          download
-          className="btn btn-outline-success mt-3 ml-2"
-        >
-          ⬇ Download Top Hits
-        </a>
-      )} */}
 
       {!scanComplete && (
         <div className="mt-2">

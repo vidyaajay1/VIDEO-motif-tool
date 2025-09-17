@@ -8,14 +8,22 @@ type Props = {
   scanVersion: number;
   onDone: () => void;
   onError: (msg: string) => void;
-  // Optional: if you can map data_id -> pretty label, pass it in
+  onDataAvailabilityChange?: (avail: {
+    hasATAC: boolean;
+    hasChIP: boolean;
+  }) => void;
   labelsByDataId?: Record<string, string>;
 };
-const GetFilterDataCompare: React.FC<Props> = (props) => {
-  const { sessionId, scanComplete, scanVersion, onDone, onError } = props;
-  const { compareResults, setCompareSessionResults, labelsByDataId } =
-    useMotifViewer();
 
+const GetFilterDataCompare: React.FC<Props> = ({
+  sessionId,
+  scanComplete,
+  scanVersion,
+  onDone,
+  onError,
+  onDataAvailabilityChange,
+}) => {
+  const { compareResults, setCompareSessionResults } = useMotifViewer();
   const existing = compareResults[sessionId];
   const filterComplete = !!existing?.filtered;
   const processedIds = existing?.processedIds ?? [];
@@ -32,12 +40,44 @@ const GetFilterDataCompare: React.FC<Props> = (props) => {
   // When scanVersion truly changes (a new scan), clear *only* this session’s results
   useEffect(() => {
     setCompareSessionResults(sessionId, { filtered: false, processedIds: [] });
+    onDataAvailabilityChange?.({ hasATAC: false, hasChIP: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, scanVersion]);
 
   const canSubmit = useShared
     ? !!(atacShared || chipShared)
     : !!(atacA || chipA || atacB || chipB);
+  useEffect(() => {
+    const hasATAC = useShared
+      ? Boolean(atacShared)
+      : Boolean(atacA) || Boolean(atacB);
+    const hasChIP = useShared
+      ? Boolean(chipShared)
+      : Boolean(chipA) || Boolean(chipB);
+
+    onDataAvailabilityChange?.({ hasATAC, hasChIP });
+  }, [
+    useShared,
+    atacShared,
+    chipShared,
+    atacA,
+    chipA,
+    atacB,
+    chipB,
+    onDataAvailabilityChange,
+  ]);
+  // If user flips the shared toggle, clear per-list/shared inputs for clarity (optional UX)
+  useEffect(() => {
+    if (useShared) {
+      setAtacA(null);
+      setChipA(null);
+      setAtacB(null);
+      setChipB(null);
+    } else {
+      setAtacShared(null);
+      setChipShared(null);
+    }
+  }, [useShared]);
 
   const handleSubmit = useCallback(async () => {
     if (!scanComplete) return onError("Please complete motif scan first");
@@ -207,28 +247,6 @@ const GetFilterDataCompare: React.FC<Props> = (props) => {
       >
         {filterComplete ? "Filtered!" : "Filter & Score (Batch)"}
       </button>
-      {/*
-      {filterComplete && (
-        <div className="mt-3 d-flex flex-column align-items-center gap-2">
-          {processedIds.map((id) => {
-            const label = labelsByDataId[id] ?? id; // fallback to id if missing
-            return (
-              <a
-                href={`${API_BASE}/download-top-hits/${encodeURIComponent(
-                  id
-                )}?label=${encodeURIComponent(label)}`}
-                className="btn btn-outline-secondary"
-                download
-              >
-                ⬇ Download Top Hits — {label}
-              </a>
-            );
-          })} 
-          <div className="mt-2 text-success">
-            Motif hits have been filtered and scored!
-          </div>
-        </div>
-      )}*/}
     </div>
   );
 };

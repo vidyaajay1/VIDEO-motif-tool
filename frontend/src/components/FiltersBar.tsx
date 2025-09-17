@@ -12,11 +12,16 @@ export type FilterSettings = {
   bestTranscript: boolean;
   perMotifPvals: Record<string, number>;
 };
+
 type Props = {
   motifList: string[];
   fimoThreshold: string; // from context
   onApply: (filters: FilterSettings) => void | Promise<void>;
   applyLabel?: string; // default: "📊 Generate Plot"
+
+  // NEW
+  allowOpenChromatin?: boolean; // default false = not provided
+  allowBindingPeaks?: boolean; // default false = not provided
 };
 
 export default function FiltersBar({
@@ -24,6 +29,8 @@ export default function FiltersBar({
   fimoThreshold,
   onApply,
   applyLabel = "📊 Generate Plot",
+  allowOpenChromatin = false,
+  allowBindingPeaks = false,
 }: Props) {
   const [openChromatin, setOpenChromatin] = useState(false);
   const [bindingPeaks, setBindingPeaks] = useState(false);
@@ -35,7 +42,14 @@ export default function FiltersBar({
   const [perMotifPvals, setPerMotifPvals] = useState<Record<string, string>>(
     {}
   );
+  // If these features are not allowed, force their values to false.
+  useEffect(() => {
+    if (!allowOpenChromatin && openChromatin) setOpenChromatin(false);
+  }, [allowOpenChromatin, openChromatin]);
 
+  useEffect(() => {
+    if (!allowBindingPeaks && bindingPeaks) setBindingPeaks(false);
+  }, [allowBindingPeaks, bindingPeaks]);
   // keep threshold map in sync with available motifs
   useEffect(() => {
     setPerMotifPvals((prev) => {
@@ -122,6 +136,7 @@ export default function FiltersBar({
               type="checkbox"
               label="Open chromatin (ATAC) regions"
               checked={openChromatin}
+              disabled={!allowOpenChromatin}
               onChange={(e) => setOpenChromatin(e.target.checked)}
             />
           </Form.Group>
@@ -130,6 +145,7 @@ export default function FiltersBar({
               type="checkbox"
               label="Binding (ChIP) regions"
               checked={bindingPeaks}
+              disabled={!allowBindingPeaks}
               onChange={(e) => setBindingPeaks(e.target.checked)}
             />
           </Form.Group>

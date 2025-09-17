@@ -29,13 +29,6 @@ export default function MotifOccurencePlot({
 
   return (
     <section className="mb-5">
-      <h4 className="text-center mb-3 mt-3">Motif Occurence Overview</h4>
-
-      <FiltersBar
-        motifList={motifList}
-        fimoThreshold={fimoThreshold}
-        onApply={onApplyFilters}
-      />
       {/* 👇 Download button slot: right below Generate Plot */}
       {parsed && children ? (
         <div className="d-flex gap-2 mt-2">{children}</div>
@@ -54,7 +47,7 @@ export default function MotifOccurencePlot({
             useResizeHandler
           />
         ) : (
-          <div>No plot generated yet.</div>
+          <div>No plot generated yet. Click on Generate Plot!</div>
         )}
       </div>
     </section>

@@ -2,6 +2,50 @@ import React, { useMemo, useState, useCallback } from "react";
 import Plot from "react-plotly.js";
 
 type PlotlyJSON = { data: any[]; layout: any; frames?: any[] };
+async function postJSON(url: string, body: FormData) {
+  const res = await fetch(url, { method: "POST", body });
+  if (!res.ok) {
+    let msg = await res.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j?.detail) msg = j.detail;
+    } catch {}
+    throw new Error(msg || "Request failed");
+  }
+  return res.json();
+}
+
+async function getJSON(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let msg = await res.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j?.detail) msg = j.detail;
+    } catch {}
+    throw new Error(msg || "Request failed");
+  }
+  return res.json();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForJob(
+  apiBase: string,
+  jobId: string,
+  timeoutMs = 10 * 60_000,
+  intervalMs = 1500
+) {
+  const start = Date.now();
+  while (true) {
+    const js = await getJSON(`${apiBase}/jobs/${encodeURIComponent(jobId)}`);
+    if (js.status === "finished") return js;
+    if (js.status === "failed") throw new Error(js.error || "Job failed");
+    if (Date.now() - start > timeoutMs)
+      throw new Error("Timed out waiting for job");
+    await sleep(intervalMs);
+  }
+}
 
 export interface BigWigOverlayCompareProps {
   sessionId: string | null;
@@ -53,6 +97,7 @@ const BigWigOverlayCompare: React.FC<BigWigOverlayCompareProps> = ({
     fd.append("label", label);
     fd.append("gene", gene);
     fd.append("window", String(inputWindow));
+
     bigwigs.forEach((f) => fd.append("bigwigs", f));
     trackInfo.forEach((s) => fd.append("chip_tracks", s));
 
@@ -60,22 +105,28 @@ const BigWigOverlayCompare: React.FC<BigWigOverlayCompareProps> = ({
     setFig(null);
 
     try {
-      const res = await fetch(`${apiBase}/plot-chip-overlay-compare`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        let msg = await res.text();
-        try {
-          const j = JSON.parse(msg);
-          if (j?.detail) msg = j.detail;
-        } catch {}
-        throw new Error(msg || "Request failed");
-      }
+      // 1) enqueue
+      const { job_id } = await postJSON(
+        `${apiBase}/plot-chip-overlay-compare`,
+        fd
+      );
 
-      const payload = await res.json();
-      const figJSON = JSON.parse(payload.chip_overlay_plot) as PlotlyJSON;
+      await waitForJob(apiBase, job_id);
+
+      const json = await getJSON(
+        `${apiBase}/plots/chip-overlay-compare/${encodeURIComponent(
+          String(sessionId)
+        )}/${encodeURIComponent(label)}/${encodeURIComponent(gene)}`
+      );
+
+      const plotObj = json.chip_overlay_plot;
+      const figJSON = (
+        typeof plotObj === "string" ? JSON.parse(plotObj) : plotObj
+      ) as PlotlyJSON;
+
+      // Responsive-friendly layout
       figJSON.layout = { ...figJSON.layout, autosize: true };
+
       setFig(figJSON);
     } catch (e: any) {
       alert(e.message ?? String(e));

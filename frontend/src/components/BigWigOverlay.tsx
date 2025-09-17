@@ -14,6 +14,53 @@ type PlotlyJSON = {
   frames?: any[];
 };
 
+/* ───────── helpers for async RQ flow ───────── */
+async function postJSON(url: string, body: FormData) {
+  const res = await fetch(url, { method: "POST", body });
+  if (!res.ok) {
+    let msg = await res.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j?.detail) msg = j.detail;
+    } catch {}
+    throw new Error(msg || "Request failed");
+  }
+  return res.json();
+}
+
+async function getJSON(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let msg = await res.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j?.detail) msg = j.detail;
+    } catch {}
+    throw new Error(msg || "Request failed");
+  }
+  return res.json();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForJob(
+  apiBase: string,
+  jobId: string,
+  timeoutMs = 10 * 60_000,
+  intervalMs = 1500
+) {
+  const start = Date.now();
+  while (true) {
+    const js = await getJSON(`${apiBase}/jobs/${encodeURIComponent(jobId)}`);
+    if (js.status === "finished") return js;
+    if (js.status === "failed") throw new Error(js.error || "Job failed");
+    if (Date.now() - start > timeoutMs)
+      throw new Error("Timed out waiting for job");
+    await sleep(intervalMs);
+  }
+}
+/* ───────────────────────────────────────────── */
+
 const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
   dataId,
   inputWindow,
@@ -45,37 +92,37 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
     fd.append("data_id", String(dataId));
     fd.append("gene", gene);
     fd.append("window", String(inputWindow));
-    bigwigs.forEach((f) => fd.append("bigwigs", f)); // multiple inputs with same name
+    // if you add these controls later, set them the same way:
+    // fd.append("per_motif_pvals_json", "");
+    // fd.append("min_score_bits", "0");
+    bigwigs.forEach((f) => fd.append("bigwigs", f)); // multiple files
     trackInfo.forEach((s) => fd.append("chip_tracks", s)); // "Name|#RRGGBB"
 
     setLoading(true);
     setFig(null);
 
     try {
-      const res = await fetch(`${apiBase}/plot-chip-overlay`, {
-        method: "POST",
-        body: fd,
-      });
+      // 1) enqueue
+      const { job_id } = await postJSON(`${apiBase}/plot-chip-overlay`, fd);
 
-      if (!res.ok) {
-        // Try to show FastAPI's {"detail": "..."} if present
-        let msg = await res.text();
-        try {
-          const j = JSON.parse(msg);
-          if (j?.detail) msg = j.detail;
-        } catch {}
-        throw new Error(msg || "Request failed");
-      }
+      // 2) wait
+      await waitForJob(apiBase, job_id);
 
-      const payload = await res.json();
-      // Backend: {"chip_overlay_plot": "<plotly-json-string>", ...}
-      const figJSON = JSON.parse(payload.chip_overlay_plot) as PlotlyJSON;
+      // 3) fetch artifact
+      const payload = await getJSON(
+        `${apiBase}/plots/chip-overlay/${encodeURIComponent(
+          String(dataId)
+        )}/${encodeURIComponent(gene)}`
+      );
+
+      // backend returns an object for `chip_overlay_plot`
+      const plotObj = payload.chip_overlay_plot; // already parsed JSON (object)
+      const figJSON = (
+        typeof plotObj === "string" ? JSON.parse(plotObj) : plotObj
+      ) as PlotlyJSON;
 
       // Make layout responsive-friendly
-      figJSON.layout = {
-        ...figJSON.layout,
-        autosize: true,
-      };
+      figJSON.layout = { ...figJSON.layout, autosize: true };
 
       setFig(figJSON);
     } catch (e: any) {
@@ -157,7 +204,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
               value={trackInfo[idx]?.split("|")[1] || "#000000"}
               onChange={(e) => {
                 const [n = ""] = (trackInfo[idx] || "|").split("|");
-                const color = e.target.value; // e.g., "#aabbcc"
+                const color = e.target.value;
                 setTrackInfo((t) => {
                   const copy = [...t];
                   copy[idx] = `${n}|${color}`;
@@ -192,7 +239,6 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
         {fig && (
           <div className="card mt-4">
             <div className="card-body">
-              {/* Give Plotly a real height in px */}
               <div
                 style={{
                   position: "relative",
@@ -202,11 +248,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
               >
                 <Plot
                   data={fig.data}
-                  layout={{
-                    ...fig.layout,
-                    // keep the server-provided height; fall back to the wrapper height
-                    autosize: true,
-                  }}
+                  layout={{ ...fig.layout, autosize: true }}
                   frames={fig.frames}
                   useResizeHandler
                   style={{
