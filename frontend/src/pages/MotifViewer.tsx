@@ -314,9 +314,9 @@ function MotifViewer() {
   };
 
   const handleGetGenomicInput = async () => {
-    if (dataType === "bed" && !bedFile) return alert("Upload a BED");
+    if (dataType === "bed" && !bedFile) throw new Error("Upload a BED");
     if (dataType === "genes" && !geneListFile)
-      return alert("Upload a gene-list CSV");
+      throw new Error("Upload a gene-list CSV or type genes");
 
     const fd = new FormData();
     if (dataType === "bed") fd.append("bed_file", bedFile!);
@@ -325,13 +325,19 @@ function MotifViewer() {
 
     try {
       const json = await postJSON(ENDPOINTS.getGenomicSingle(API_BASE), fd);
+
+      // keep your existing state updates
       setDataId(json.data_id);
       setPeakList(json.peak_list);
       setScanComplete(false);
       setOverviewFigureJson(null);
       setFilteredOverviewFigureJson(null);
+
+      return json; // <-- IMPORTANT: let the child read unmatched_genes
     } catch (e: any) {
+      // Optional UI alert, but DO NOT swallow the error—rethrow it.
       alert(e.message || String(e));
+      throw e; // <-- IMPORTANT: child will catch and show warnings
     }
   };
 
@@ -564,7 +570,7 @@ function MotifViewer() {
                 />
 
                 <GenomicInput
-                  compareMode={isCompare}
+                  compareMode={false}
                   dataType={dataType}
                   setDataType={setDataType}
                   bedFile={bedFile}
@@ -573,16 +579,9 @@ function MotifViewer() {
                   setGeneListFile={setGeneListFile}
                   inputWindow={inputWindow}
                   setInputWindow={setInputWindow}
-                  onProcess={async () => {
-                    if (isCompare) await handleGetGenomicInputCompare();
-                    else await handleGetGenomicInput();
-                  }}
+                  onProcess={handleGetGenomicInput} // <-- IMPORTANT
                   canProcess={
-                    isCompare
-                      ? Boolean(
-                          labelA && labelB && geneListFileA && geneListFileB
-                        )
-                      : dataType === "bed"
+                    dataType === "bed"
                       ? Boolean(bedFile)
                       : Boolean(geneListFile)
                   }

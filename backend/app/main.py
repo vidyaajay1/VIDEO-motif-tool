@@ -1,11 +1,10 @@
-import os, uuid, shutil, pickle, json, csv, re, io, zipfile
+import os, uuid, shutil, pickle, json, csv, re
 import pandas as pd
-from functools import reduce
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Request,  HTTPException, Query
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Tuple
 from redis import Redis
@@ -138,8 +137,15 @@ async def get_genomic_input(
     if peaks_df.empty:
         raise HTTPException(
         status_code=400,
-        detail="No matching genes detected. Please check your input gene list."
+        detail="No matching genes detected. Please check your input gene list try again after reloading the page."
     )
+    # Determine which input genes were matched
+    def extract_gene(peak_id):
+        return re.split(r"_FBtr", peak_id)[0]
+
+    matched_genes = {extract_gene(pid) for pid in peaks_df['Peak_ID']}
+    unmatched_genes = [g for g in gene_list if g not in matched_genes]
+
     # ————— persist and respond —————
     data_id = uuid.uuid4().hex
     peaks_df.to_pickle(os.path.join(TMP_DIR, f"{data_id}_peaks.pkl"))
@@ -148,9 +154,7 @@ async def get_genomic_input(
             pickle.dump(gene_list, f)
         with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
             pickle.dump(gene_lfc, lf) 
-
-    def extract_gene(peak_id):
-        return re.split(r"_FBtr", peak_id)[0]    
+ 
     peak_list = list(peaks_df['Peak_ID'])           
     peak_list = sorted(
         peak_list,
@@ -160,7 +164,8 @@ async def get_genomic_input(
         genome="fasta/genome.fa",
         peaks_df=peaks_df.to_dict(orient="records"),
         data_id=data_id,
-        peak_list=peak_list
+        peak_list=peak_list,
+        unmatched_genes=unmatched_genes
     )
 
 

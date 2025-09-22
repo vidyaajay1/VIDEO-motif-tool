@@ -25,7 +25,7 @@ class OverviewResponse(BaseModel):
     peaks_df: List[Dict[str, Any]]
     data_id: str
     peak_list: List[str]
-
+    unmatched_genes: List[str] = []
 # --- Update your response model to carry Plotly JSON ---
 class PlotOverviewResponse(BaseModel):
     data_id: str
