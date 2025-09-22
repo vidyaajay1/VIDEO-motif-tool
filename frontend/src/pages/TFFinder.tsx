@@ -5,8 +5,8 @@ import { useTFContext } from "../context/TFContext";
 import ProcessTomtom from "../components/ProcessTomtom";
 import FilterTFs from "../components/FilterTFs";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
+// const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 const TFFinder: React.FC = () => {
   const { state, dispatch } = useTFContext();
   const { dataSource, stage, tissue, tissueOptions, genes } = state;
