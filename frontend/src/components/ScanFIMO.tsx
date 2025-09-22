@@ -4,8 +4,8 @@ import { UserMotif } from "./GetMotifInput";
 import InfoTip from "./InfoTip";
 import { useMotifViewer } from "../context/MotifViewerContext";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
+//const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 export interface ScanFIMOProps {
   dataId: string | null;
   inputWindow: number;

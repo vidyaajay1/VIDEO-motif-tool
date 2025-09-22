@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { Card, Form, Button, Spinner, Alert, Collapse } from "react-bootstrap";
 import { useTFContext } from "../context/TFContext";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
+//const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 interface TFResult {
   symbol: string;
   flybase_id: string;

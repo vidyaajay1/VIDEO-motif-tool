@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+//const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 import InfoTip from "./InfoTip";
 import { useMotifViewer } from "../context/MotifViewerContext";
 
