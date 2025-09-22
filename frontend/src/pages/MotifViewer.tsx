@@ -570,7 +570,7 @@ function MotifViewer() {
                 />
 
                 <GenomicInput
-                  compareMode={false}
+                  compareMode={isCompare}
                   dataType={dataType}
                   setDataType={setDataType}
                   bedFile={bedFile}
@@ -579,7 +579,11 @@ function MotifViewer() {
                   setGeneListFile={setGeneListFile}
                   inputWindow={inputWindow}
                   setInputWindow={setInputWindow}
-                  onProcess={handleGetGenomicInput} // <-- IMPORTANT
+                  onProcess={
+                    isCompare
+                      ? handleGetGenomicInputCompare
+                      : handleGetGenomicInput
+                  } // <-- IMPORTANT
                   canProcess={
                     dataType === "bed"
                       ? Boolean(bedFile)

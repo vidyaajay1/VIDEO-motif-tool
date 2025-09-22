@@ -332,7 +332,7 @@ export default function GenomicInput({
                 as="textarea"
                 rows={4}
                 value={geneText}
-                placeholder="e.g., CrebA, otp, byn, Retn"
+                placeholder="e.g., CrebA, otp, byn, retn"
                 onChange={(e) => {
                   setGeneText(e.target.value);
                   setProcessed(false);
