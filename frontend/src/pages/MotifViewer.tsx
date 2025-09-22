@@ -20,8 +20,8 @@ import MotifOccurrenceCompare from "../components/MotifOccurrenceCompare";
 import type { FilterSettings } from "../types/FilterSettings";
 import FiltersBar from "../components/FiltersBar";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
+//const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 // ---------- Small helpers ----------
 const DEFAULT_FILTERS: FilterSettings = {
   openChromatin: false,
