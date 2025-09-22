@@ -1,6 +1,4 @@
-import os
-import uuid
-import subprocess
+import os, shutil, uuid, subprocess
 import pandas as pd
 from pyfaidx import Fasta
 from fastapi import HTTPException
@@ -8,7 +6,19 @@ from app.new_process_input import process_genomic_input
 from app.utils import reverse_complement
 import xml.etree.ElementTree as ET
 
-#wrapper function to process genomic input - CALL THIS FROM MAIN.PY
+def resolve_streme_exe():
+    for k in ("VIDEO_STREME_PATH", "STREME_PATH"):
+        p = os.getenv(k)
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    p = shutil.which("streme")
+    if p:
+        return p
+    raise HTTPException(
+        status_code=500,
+        detail="STREME binary not found. Set VIDEO_STREME_PATH/STREME_PATH "
+               "or install MEME Suite (conda install -c bioconda meme)."
+    )
 
 def write_fasta_from_genes(gene_list, genome_fasta_path, window_size = 500):
     genome = Fasta(genome_fasta_path)
@@ -42,15 +52,16 @@ def write_fasta_from_genes(gene_list, genome_fasta_path, window_size = 500):
     return fasta_path
 
 def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir):
+    streme_bin = resolve_streme_exe()
+    print(f"[STREME] using: {streme_bin}")
     input_fasta = os.path.abspath(input_fasta)
     output_id = str(uuid.uuid4())
     streme_out = os.path.abspath(os.path.join(tmp_dir, f"{output_id}_streme_out"))
     os.makedirs(streme_out, exist_ok=True)
-    print(f"[INFO] Running STREME on {input_fasta} with output {streme_out}")
 
     try:
         subprocess.run([
-            "streme",
+            streme_bin,
             "--oc", streme_out,
             "--dna",
             "--p", input_fasta,
@@ -62,7 +73,6 @@ def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir):
         raise HTTPException(status_code=500, detail=f"STREME failed: {e}")
 
     return streme_out, output_id
-
 
 def parse_streme_results(streme_out, output_id, request):
     xml_path = os.path.join(streme_out, "streme.xml")
