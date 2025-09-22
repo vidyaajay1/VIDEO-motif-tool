@@ -6,6 +6,9 @@ from app.new_process_input import process_genomic_input
 from app.utils import reverse_complement
 import xml.etree.ElementTree as ET
 
+STREME_PATH = "/home/ec2-user/miniconda3/envs/memesuite/bin/streme"
+
+STREME_ENV_VARS = ("VIDEO_STREME_PATH", "STREME_PATH")  # allow either
 def resolve_streme_exe():
     for k in ("VIDEO_STREME_PATH", "STREME_PATH"):
         p = os.getenv(k)
