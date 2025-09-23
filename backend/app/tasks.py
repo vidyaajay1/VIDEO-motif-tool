@@ -23,8 +23,6 @@ def _load_session(session_id: str) -> List[DatasetInfo]:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Unknown comparison session_id")
 
-TMP_DIR = "tmp"
-
 def _progress(pct: int):
     """Helper to update job progress in RQ meta."""
     job = get_current_job()
