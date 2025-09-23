@@ -1,12 +1,30 @@
-import React, { useState } from "react";
-import { Card, Form, Button, Row, Col, Spinner } from "react-bootstrap";
+// StremeDiscoveryCard.tsx
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Card,
+  Form,
+  Button,
+  Row,
+  Col,
+  Spinner,
+  ProgressBar,
+} from "react-bootstrap";
 
 //const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+
 interface StremeDiscoveryCardProps {
   selectedStage: string;
   selectedTissue: string;
 }
+
+type StremeJobResult = {
+  motifs: any[];
+  streme_html_url: string;
+  tmp_id: string;
+};
+
+const POLL_MS = 1500;
 
 const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
   selectedStage,
@@ -19,12 +37,72 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
   const [minWidth, setMinWidth] = useState<number>(6);
   const [maxWidth, setMaxWidth] = useState<number>(10);
   const [windowSize, setWindowSize] = useState<number>(500);
-  const [result, setResult] = useState<any>(null);
+
+  // Job state
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [tmpId, setTmpId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [status, setStatus] = useState<string | null>(null);
+  const [result, setResult] = useState<StremeJobResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const pollRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => stopPolling(); // cleanup on unmount
+  }, []);
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    // start polling
+    stopPolling();
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/jobs/${jobId}`);
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json(); // {status, progress, result?}
+
+        setStatus(j.status ?? null);
+        setProgress(typeof j.progress === "number" ? j.progress : 0);
+
+        if (j.status === "finished") {
+          stopPolling();
+          // normalize shape
+          if (j.result && j.result.motifs) {
+            setResult(j.result as StremeJobResult);
+          } else {
+            setResult({ motifs: [], streme_html_url: "", tmp_id: tmpId || "" });
+          }
+          setIsRunning(false);
+        } else if (j.status === "failed") {
+          stopPolling();
+          setIsRunning(false);
+          console.error(j.error || "STREME job failed");
+          alert("STREME job failed. Check server logs.");
+        }
+      } catch (e) {
+        stopPolling();
+        setIsRunning(false);
+        console.error(e);
+        alert(`Error polling STREME job: ${e}`);
+      }
+    }, POLL_MS) as unknown as number;
+  }, [jobId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRunStreme = async () => {
     setIsRunning(true);
     setResult(null);
+    setJobId(null);
+    setTmpId(null);
+    setProgress(0);
+    setStatus("queued");
 
     const formData = new FormData();
     formData.append("minw", String(minWidth));
@@ -47,18 +125,21 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
         method: "POST",
         body: formData,
       });
-
       if (!res.ok) throw new Error(await res.text());
-
-      const data = await res.json();
-      setResult(data);
+      const data = await res.json(); // { job_id, tmp_id, status, poll_url? }
+      setJobId(data.job_id);
+      setTmpId(data.tmp_id ?? null);
+      setStatus(data.status ?? "queued");
+      // polling starts via useEffect
     } catch (err) {
       console.error("Error running STREME:", err);
       alert(`Failed to run STREME: ${err}`);
-    } finally {
       setIsRunning(false);
     }
   };
+
+  const disabledRun =
+    isRunning || (inputSource === "uploaded" && !uploadedFile);
 
   return (
     <Card className="p-4 mt-4">
@@ -68,6 +149,7 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
           STREME: Bailey, L. T. <i>Bioinformatics</i> 2021
         </small>
       </div>
+
       <Form.Group className="mb-3">
         <Form.Label>Choose Input Source</Form.Label>
         <Form.Check
@@ -133,40 +215,59 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
         className="mt-3"
         variant="primary"
         onClick={handleRunStreme}
-        disabled={isRunning || (inputSource === "uploaded" && !uploadedFile)}
+        disabled={disabledRun}
       >
-        {isRunning ? (
+        {isRunning || jobId ? (
           <>
-            <Spinner animation="border" size="sm" /> Running STREME...
+            <Spinner animation="border" size="sm" className="me-2" />
+            {status === "finished"
+              ? "Finalizing..."
+              : status === "failed"
+              ? "Failed"
+              : status === "started"
+              ? `Running STREME... ${progress || 0}%`
+              : "Queued..."}
           </>
         ) : (
           "Run STREME"
         )}
       </Button>
+
+      {jobId && status && status !== "finished" && (
+        <div className="mt-3">
+          <ProgressBar now={progress || 0} label={`${progress || 0}%`} />
+          <div className="text-muted small mt-1">Job: {jobId}</div>
+        </div>
+      )}
+
       {result && (
         <div className="mt-4">
-          {result.motifs.length > 0 ? (
+          {Array.isArray(result.motifs) && result.motifs.length > 0 ? (
             <p>Discovered {result.motifs.length} motifs!</p>
           ) : (
             <p>No motifs discovered.</p>
           )}
 
-          <a
-            href={result.streme_html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-outline-primary mt-2"
-          >
-            View Full STREME Report{" "}
-            <i className="bi bi-box-arrow-up-right ms-2"></i>
-          </a>
+          {result.streme_html_url && (
+            <a
+              href={result.streme_html_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-outline-primary mt-2"
+            >
+              View Full STREME Report{" "}
+              <i className="bi bi-box-arrow-up-right ms-2"></i>
+            </a>
+          )}
 
-          <a
-            href={`${API_BASE}/download-streme/${result.tmp_id}`}
-            className="btn btn-outline-success mt-2 ms-3"
-          >
-            Download Discovered Motifs (MEME Format)
-          </a>
+          {(result.tmp_id || tmpId) && (
+            <a
+              href={`${API_BASE}/download-streme/${result.tmp_id ?? tmpId}`}
+              className="btn btn-outline-success mt-2 ms-3"
+            >
+              Download Discovered Motifs (MEME Format)
+            </a>
+          )}
         </div>
       )}
     </Card>
