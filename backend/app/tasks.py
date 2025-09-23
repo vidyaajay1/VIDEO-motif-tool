@@ -13,8 +13,7 @@ from app.bigwig_overlay import fetch_bw_coverage, plot_chip_overlay
 from app.run_streme import run_streme_on_fasta, parse_streme_results, write_fasta_from_genes
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent  # .../app
-TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve() # repo_root/tmp, absolute
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 def _load_session(session_id: str) -> List[DatasetInfo]:

@@ -29,9 +29,11 @@ from app.mem_logger import start_mem_logger
 import app.models as models
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent  # .../app
-TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve()
 TMP_DIR.mkdir(parents=True, exist_ok=True)
+#BASE_DIR = Path(__file__).resolve().parent  # .../app
+#TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+#TMP_DIR.mkdir(parents=True, exist_ok=True)
 TF_DATA_CACHE = {}  # type: Dict[str, pd.DataFrame]
 
 @asynccontextmanager

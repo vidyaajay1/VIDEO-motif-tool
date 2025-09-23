@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Optional, Any
 
 
-BASE_DIR = Path(__file__).resolve().parent  # .../app
-TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve()
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 STREME_PATH = "/home/ec2-user/miniconda3/envs/memesuite/bin/streme"

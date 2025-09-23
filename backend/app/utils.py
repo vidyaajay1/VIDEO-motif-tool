@@ -2,7 +2,8 @@ import numpy as np, io, os, shutil
 from typing import List, Dict, Tuple, Optional, Any
 import json
 import pandas as pd
-TMP_DIR = "tmp"
+from pathlib import Path
+TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve()
 def clear_tmp_dir():
     if os.path.isdir(TMP_DIR):
         for name in os.listdir(TMP_DIR):
