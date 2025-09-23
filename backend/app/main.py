@@ -18,7 +18,8 @@ from app.tasks import (
     plot_filtered_single_task, 
     plot_filtered_compare_task,
     chip_overlay_single_task,
-    chip_overlay_compare_task)
+    chip_overlay_compare_task,
+    run_streme_task)
 from app.new_process_input import process_genomic_input, get_motif_list
 from app.run_streme import write_fasta_from_genes, run_streme_on_fasta, parse_streme_results
 from app.process_tomtom import subset_by_genes
@@ -825,7 +826,6 @@ async def download_de_genes(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-
 @app.post("/run-streme")
 async def run_streme_endpoint(
     request: Request,
@@ -835,21 +835,20 @@ async def run_streme_endpoint(
     use_de_genes: bool = Form(True),
     tissue: Optional[str] = Form(None),
     stage: Optional[str] = Form(None),
-    gene_file: Optional[UploadFile] = File(None)
+    gene_file: Optional[UploadFile] = File(None),
 ):
     try:
         genome_path = "fasta/genome.fa"
 
+        # --- Build gene_list in the API process ---
         if use_de_genes:
             if not tissue or not stage:
                 raise HTTPException(status_code=400, detail="Missing tissue or stage selection")
 
-            # Retrieve DE genes from cache (assuming TF_DATA_CACHE uses sheet names)
             sheet_map = {
                 "10-12": "stage 10-12",
-                "13-16": "stage 13-16"
+                "13-16": "stage 13-16",
             }
-
             if stage not in sheet_map:
                 raise HTTPException(status_code=400, detail="Invalid stage")
 
@@ -861,38 +860,63 @@ async def run_streme_endpoint(
             if "gene" not in df.columns or "cell_types" not in df.columns:
                 raise HTTPException(status_code=500, detail="Required columns missing in DE data")
 
-            gene_list = (df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist())
-
+            gene_list = df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist()
             if not gene_list:
                 raise HTTPException(status_code=404, detail="No DE genes found for this tissue")
-
         else:
             if gene_file is None:
                 raise HTTPException(status_code=400, detail="Gene list file missing")
-
             df = pd.read_csv(gene_file.file)
             if df.empty or df.shape[1] < 1:
                 raise HTTPException(status_code=400, detail="Uploaded gene file is empty or invalid")
-
             gene_list = df.iloc[:, 0].dropna().tolist()
+            if not gene_list:
+                raise HTTPException(status_code=400, detail="No genes found in the uploaded file")
 
-        # Write FASTA from genes
-        fasta_path = write_fasta_from_genes(gene_list, genome_path, window_size)
+        # --- Enqueue the background job ---
+        tmp_id = uuid.uuid4().hex
+        job = q.enqueue(
+            run_streme_task,
+            gene_list,
+            minw,
+            maxw,
+            window_size,
+            tmp_id,
+            genome_path,           # keyword optional; matches the default anyway
+            job_timeout="3600",     # optional per-job override
+        )
 
-        # Run STREME
-        streme_out, output_id = run_streme_on_fasta(fasta_path, minw, maxw, TMP_DIR)
+        # Return identifiers the client can use to poll & later download
+        return {
+            "job_id": job.get_id(),
+            "tmp_id": tmp_id,
+            "status": "queued",
+            "poll_url": f"/jobs/{job.get_id()}",
+        }
 
-        # Parse STREME results
-        motifs, html_url = parse_streme_results(streme_out, output_id, request)
-
-        return {"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}
-
-    except HTTPException as e:
-        raise e
-
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-    
+
+
+@app.get("/jobs/{job_id}")
+def get_job_status(job_id: str):
+    try:
+        job = Job.fetch(job_id, connection=redis_conn)
+    except Exception:
+        return JSONResponse(content={"error": f"Job not found: {job_id}"}, status_code=404)
+
+    status = job.get_status()
+    progress = job.meta.get("progress", 0)
+    if status == "finished":
+        # result contains {"motifs", "streme_html_url", "tmp_id"}
+        return {"status": status, "progress": 100, "result": job.result}
+    if status == "failed":
+        return {"status": status, "progress": progress, "error": str(job.exc_info)}
+    return {"status": status, "progress": progress}
+
+
 @app.get("/download-streme/{tmp_id}")
 def download_streme_file(tmp_id: str):
     file_path = os.path.join(TMP_DIR, f"{tmp_id}_streme_out", "streme.txt")

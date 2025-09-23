@@ -1,7 +1,7 @@
-import os, json, io, pickle, zipfile
+import os, json, io, pickle, zipfile, uuid
 import pandas as pd
 from rq import get_current_job
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from app.new_scan_motifs import scan_wrapper
 from app.plotting import plot_occurrence_overview_plotly, rank_peaks_for_plot 
 from app.utils import _parse_per_motif_pvals, _df_to_csv_bytes, _df_to_records_json_safe  # adjust
@@ -10,6 +10,12 @@ from fastapi import HTTPException
 from app.filter_motifs import filter_motif_hits
 from app.integrated_scoring import score_and_merge, score_hit_naive_bayes
 from app.bigwig_overlay import fetch_bw_coverage, plot_chip_overlay
+from app.run_streme import run_streme_on_fasta, parse_streme_results, write_fasta_from_genes
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent  # .../app
+TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 def _load_session(session_id: str) -> List[DatasetInfo]:
     try:
@@ -502,3 +508,43 @@ def chip_overlay_compare_task(
     _write_json(out_json, json.loads(fig.to_json()))
     _progress(100)
     return {"session_id": session_id, "label": label, "gene": gene, "ok": True}
+
+def run_streme_task(
+    gene_list: List[str],
+    minw: int,
+    maxw: int,
+    window_size: int,
+    tmp_id: str,
+    genome_path: str = "fasta/genome.fa",
+) -> dict:
+    """
+    CPU task: write FASTA from provided gene_list, run STREME, parse results.
+    Returns a small JSON-safe dict. Artifacts are written under TMP_DIR using tmp_id.
+    """
+    _progress(1)
+
+    if not gene_list:
+        raise RuntimeError("Empty gene list provided to run_streme_task")
+
+    # 1) Write FASTA
+    fasta_path = write_fasta_from_genes(gene_list, genome_path, window_size)
+    _progress(20)
+
+    # 2) Run STREME (pin outputs to tmp_id folder)
+    streme_out, output_id = run_streme_on_fasta(
+        fasta_path, minw, maxw, TMP_DIR, output_id=tmp_id
+    )
+    _progress(70)
+
+    # 3) Parse results (worker-safe: request=None)
+    motifs, html_url = parse_streme_results(streme_out, output_id, request=None)
+    _progress(90)
+
+    # 4) Persist compact JSON (optional but handy)
+    outdir = os.path.join(TMP_DIR, f"{output_id}_streme_out")
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, "result.json"), "w") as f:
+        json.dump({"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}, f)
+
+    _progress(100)
+    return {"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os, shutil, uuid, subprocess
 from pyfaidx import Fasta
 from fastapi import HTTPException
@@ -5,6 +6,8 @@ from app.new_process_input import process_genomic_input
 from app.utils import reverse_complement
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Optional, Any
+
 
 BASE_DIR = Path(__file__).resolve().parent  # .../app
 TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
@@ -58,12 +61,15 @@ def write_fasta_from_genes(gene_list, genome_fasta_path, window_size = 500):
                 continue
     return fasta_path
 
-def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir):
+def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir, output_id: str | None = None):
     tmp_dir = os.path.abspath(tmp_dir)
     streme_bin = resolve_streme_exe()
     print(f"[STREME] using: {streme_bin}")
     input_fasta = os.path.abspath(input_fasta)
-    output_id = str(uuid.uuid4())
+
+    if output_id is None:
+        output_id = str(uuid.uuid4())
+
     streme_out = os.path.abspath(os.path.join(tmp_dir, f"{output_id}_streme_out"))
     os.makedirs(streme_out, exist_ok=True)
 
@@ -82,7 +88,7 @@ def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir):
 
     return streme_out, output_id
 
-def parse_streme_results(streme_out, output_id, request):
+def parse_streme_results(streme_out, output_id, request: Optional[Any] = None):
     xml_path = os.path.join(streme_out, "streme.xml")
     motifs = []
 
@@ -104,7 +110,12 @@ def parse_streme_results(streme_out, output_id, request):
                     float(pos_elem.attrib.get("G", 0.0)),
                     float(pos_elem.attrib.get("T", 0.0))
                 ])
-            html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
+
+            if request is not None:
+                html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
+            else:
+                html_url = f"/tmp/{output_id}_streme_out/streme.html"  # adjust to your mount
+
             motifs.append({
                 "id": f"{i+1}",
                 "consensus": consensus,
@@ -116,5 +127,9 @@ def parse_streme_results(streme_out, output_id, request):
                 "html_link": str(html_url),
             })
 
-    html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
+    # same URL policy for the return value:
+    if request is not None:
+        html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
+    else:
+        html_url = f"/api/tmp/{output_id}_streme_out/streme.html"
     return motifs, str(html_url)
