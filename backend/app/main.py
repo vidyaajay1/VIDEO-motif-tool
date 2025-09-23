@@ -26,8 +26,11 @@ from app.filter_tfs import filter_tfs_from_gene_list
 from app.utils import clear_tmp_dir
 from app.mem_logger import start_mem_logger
 import app.models as models
+from pathlib import Path
 
-TMP_DIR = "tmp"
+BASE_DIR = Path(__file__).resolve().parent  # .../app
+TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR.mkdir(parents=True, exist_ok=True)
 TF_DATA_CACHE = {}  # type: Dict[str, pd.DataFrame]
 
 @asynccontextmanager
