@@ -61,8 +61,8 @@ q = Queue("cpu", connection=redis_conn, default_timeout="3600")  # 1 hour defaul
 app = FastAPI(lifespan=lifespan)
 os.makedirs(TMP_DIR, exist_ok=True)
 
-
 app.mount("/api/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
+app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp_alt") #backup compatibility mount
 app.mount("/api/static", StaticFiles(directory="app/static"), name="static")
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")

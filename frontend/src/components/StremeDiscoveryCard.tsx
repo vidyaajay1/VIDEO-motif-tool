@@ -81,9 +81,13 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
             setResult({ motifs: [], streme_html_url: "", tmp_id: tmpId || "" });
           }
           setIsRunning(false);
+          setStatus("finished");
+          setJobId(null);
         } else if (j.status === "failed") {
           stopPolling();
           setIsRunning(false);
+          setStatus("finished");
+          setJobId(null);
           console.error(j.error || "STREME job failed");
           alert("STREME job failed. Check server logs.");
         }

@@ -114,7 +114,7 @@ def parse_streme_results(streme_out, output_id, request: Optional[Any] = None):
             if request is not None:
                 html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
             else:
-                html_url = f"/tmp/{output_id}_streme_out/streme.html"  # adjust to your mount
+                html_url = f"/api/tmp/{output_id}_streme_out/streme.html" 
 
             motifs.append({
                 "id": f"{i+1}",
@@ -132,4 +132,5 @@ def parse_streme_results(streme_out, output_id, request: Optional[Any] = None):
         html_url = request.url_for("tmp", path=f"{output_id}_streme_out/streme.html")
     else:
         html_url = f"/api/tmp/{output_id}_streme_out/streme.html"
+
     return motifs, str(html_url)
