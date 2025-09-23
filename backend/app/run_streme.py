@@ -4,8 +4,12 @@ from fastapi import HTTPException
 from app.new_process_input import process_genomic_input
 from app.utils import reverse_complement
 import xml.etree.ElementTree as ET
-from app.main import TMP_DIR 
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent  # .../app
+TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
+TMP_DIR.mkdir(parents=True, exist_ok=True)
+
 STREME_PATH = "/home/ec2-user/miniconda3/envs/memesuite/bin/streme"
 
 STREME_ENV_VARS = ("VIDEO_STREME_PATH", "STREME_PATH")  # allow either
