@@ -31,6 +31,9 @@ from pathlib import Path
 
 TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve()
 TMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+
 #BASE_DIR = Path(__file__).resolve().parent  # .../app
 #TMP_DIR = (BASE_DIR.parent / "tmp").resolve()  # repo_root/tmp, absolute
 #TMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,6 +66,17 @@ q = Queue("cpu", connection=redis_conn, default_timeout="3600")  # 1 hour defaul
 app = FastAPI(lifespan=lifespan)
 os.makedirs(TMP_DIR, exist_ok=True)
 
+
+###
+import logging
+logger = logging.getLogger("uvicorn")
+logger.info(f"[VIDEO] TMP_DIR set to: {TMP_DIR}")
+if not TMP_DIR.exists():
+    logger.error(f"[VIDEO] TMP_DIR does not exist: {TMP_DIR}")
+else:
+    # Show what's currently inside
+    logger.info(f"[VIDEO] TMP_DIR contents: {list(TMP_DIR.iterdir())}")
+###
 app.mount("/api/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
 app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp_alt") #backup compatibility mount
 app.mount("/api/static", StaticFiles(directory="app/static"), name="static")
