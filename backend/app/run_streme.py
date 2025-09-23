@@ -61,7 +61,7 @@ def write_fasta_from_genes(gene_list, genome_fasta_path, window_size = 500):
     return fasta_path
 
 def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir, output_id: str | None = None):
-    tmp_dir = os.path.abspath(tmp_dir)
+    tmp_dir = TMP_DIR
     streme_bin = resolve_streme_exe()
     print(f"[STREME] using: {streme_bin}")
     input_fasta = os.path.abspath(input_fasta)
@@ -125,6 +125,7 @@ def parse_streme_results(streme_out, output_id, request: Optional[Any] = None):
                 "pwm": pwm,
                 "html_link": str(html_url),
             })
+
 
     # same URL policy for the return value:
     if request is not None:
