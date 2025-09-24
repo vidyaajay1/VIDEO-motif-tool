@@ -9,7 +9,10 @@ def _strip_chr_iv(iv):
    #pybedtools.each() helper to modify iv.chrom in-place.
     iv.chrom = _strip_chr_name(iv.chrom)
     return iv
-
+EXPECTED_COLS = [
+    "Peak_ID", "Motif", "Chromosome", "Hit_start", "Hit_end",
+    "Rel_pos", "Score_bits", "Strand", "logFC", "Sequence", "p_value"
+]
 
 def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
     """
@@ -63,6 +66,9 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
 
     # Convert to DataFrame
     filtered_df = pd.DataFrame(filtered_records)
+    if filtered_df.empty:
+        return pd.DataFrame(columns=EXPECTED_COLS)
+    
     print(filtered_df.head())
     # Merge with original hits_df to recover motif and strand
     result = (

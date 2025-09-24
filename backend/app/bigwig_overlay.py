@@ -215,8 +215,10 @@ def plot_chip_overlay(
             showarrow=False,
             x=0.5,
             y=0.5,
-            xref="x1 domain",
-            yref="y1 domain",
+            xref="x domain",   # not "x1 domain"
+            yref="y domain",   # not "y1 domain"
+            xanchor="center",
+            yanchor="middle",
             row=1,
             col=1,
         )
