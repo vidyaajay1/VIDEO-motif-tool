@@ -720,7 +720,7 @@ Enter a name and choose a color for each motif.`}
             {activeStep === 4 && (
               <>
                 <h4 className="text-center mb-3 mt-3">
-                  Motif Occurence Overview
+                  Motif Occurrence Overview
                 </h4>
                 {isCompare ? (
                   <>
