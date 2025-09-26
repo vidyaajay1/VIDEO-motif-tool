@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 from fastapi import UploadFile, HTTPException
 
-TMP_DIR = os.environ.get("TMP_DIR", "/app_data/tmp_jobs")
+TMP_DIR = Path(os.getenv("VIDEO_TMP_DIR", "/app_data/tmp_jobs")).resolve()
 TRACKS_DIR = Path(TMP_DIR) / "tracks"
 TRACKS_DIR.mkdir(parents=True, exist_ok=True)
 
