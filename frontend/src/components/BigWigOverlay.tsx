@@ -200,32 +200,12 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
       <div className="card-body">
         <h5 className="card-title">Overlay ChIP/ATAC BigWig Tracks</h5>
 
-        {/* Gene / peak picker */}
-        <div className="mb-3">
-          <label className="form-label">Choose Peak/Gene:</label>
-          <select
-            className="form-select"
-            value={gene}
-            onChange={(e) => setGene(e.target.value)}
-            disabled={disabled}
-          >
-            <option value="">-- pick one --</option>
-            {peakList.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Registered tracks (persisted) */}
         <div className="mb-3">
-          <label className="form-label">
-            Registered Tracks (persisted for this dataId)
-          </label>
+          <label className="form-label">Choose from Uploaded Tracks</label>
           {Object.keys(registry).length === 0 ? (
             <div className="form-text">
-              No tracks yet. Upload &amp; register below.
+              No tracks yet. Upload &amp; click Process Tracks below.
             </div>
           ) : (
             <div className="d-flex flex-column gap-1">
@@ -274,7 +254,9 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
 
         {/* Upload + register (one-time per analysis) */}
         <div className="mb-2">
-          <label className="form-label">Add new .bw files (optional)</label>
+          <label className="form-label">
+            Add new .bw/.bigwig files (up to three)
+          </label>
           <input
             type="file"
             className="form-control"
@@ -355,9 +337,25 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
             disabled={disabled || saving || bigwigs.length === 0}
             title="Upload & persist these tracks for this dataId"
           >
-            {saving ? "Registering…" : "Register Tracks"}
+            {saving ? "Registering…" : "Process Tracks"}
           </button>
-
+          {/* Gene / peak picker */}
+          <div className="mb-3">
+            <label className="form-label">Choose Peak/Gene:</label>
+            <select
+              className="form-select"
+              value={gene}
+              onChange={(e) => setGene(e.target.value)}
+              disabled={disabled}
+            >
+              <option value="">-- pick one --</option>
+              {peakList.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             className="btn btn-primary"
             onClick={handleOverlaySubmit}
