@@ -741,45 +741,6 @@ async def plot_chip_overlay_compare_enqueue(
         job_timeout="3600",
     )
     return {"job_id": job.get_id()}
-
-'''
-@app.post("/plot-chip-overlay")  # enqueue
-async def plot_chip_overlay_enqueue(
-    data_id: str = Form(...),
-    bigwigs: List[UploadFile] = File(...),
-    chip_tracks: List[str] = Form(...),   # each "Label|#RRGGBB"
-    gene: str = Form(...),
-    window: int = Form(500),
-    per_motif_pvals_json: str = Form(default=""),
-    min_score_bits: float = Form(0.0),
-):
-    if len(bigwigs) != len(chip_tracks):
-        raise HTTPException(status_code=400, detail="Mismatch in bigwig and track metadata count")
-
-    # save uploaded .bw files once; pass paths to worker
-    bw_inputs: List[Tuple[str, str, str]] = []
-    for i, bw_file in enumerate(bigwigs):
-        try:
-            label, color = chip_tracks[i].split("|", 1)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid track meta '{chip_tracks[i]}'. Use 'Label|#RRGGBB'.")
-        path = os.path.join(TMP_DIR, f"{uuid.uuid4()}.bw")
-        with open(path, "wb") as f:
-            shutil.copyfileobj(bw_file.file, f)
-        bw_inputs.append((path, label.strip(), color.strip()))
-        try:
-            bw_file.file.close()
-        except Exception:
-            pass
-
-    job = q.enqueue(
-        chip_overlay_single_task,
-        data_id, gene, int(window), bw_inputs, per_motif_pvals_json, float(min_score_bits),
-        retry=Retry(max=2, interval=[10, 30]),
-        job_timeout="3600",
-    )
-    return {"job_id": job.get_id()}
-
 @app.get("/plots/chip-overlay/{data_id}/{gene}")  # fetch
 def fetch_chip_overlay(data_id: str, gene: str):
     fp = os.path.join(TMP_DIR, f"{data_id}_{gene}_chip_overlay.json")
@@ -787,50 +748,12 @@ def fetch_chip_overlay(data_id: str, gene: str):
         raise HTTPException(status_code=404, detail="Overlay not ready")
     return {"chip_overlay_plot": json.load(open(fp)), "data_id": data_id, "gene": gene}
 
-@app.post("/plot-chip-overlay-compare")  # enqueue
-async def plot_chip_overlay_compare_enqueue(
-    session_id: str = Form(...),
-    label: str = Form(...),
-    bigwigs: List[UploadFile] = File(...),
-    chip_tracks: List[str] = Form(...),
-    gene: str = Form(...),
-    window: int = Form(500),
-    per_motif_pvals_json: str = Form(default=""),
-    min_score_bits: float = Form(0.0),
-):
-    if len(bigwigs) != len(chip_tracks):
-        raise HTTPException(status_code=400, detail="Mismatch in bigwig and track metadata count")
-
-    bw_inputs: List[Tuple[str, str, str]] = []
-    for i, bw_file in enumerate(bigwigs):
-        try:
-            tr_label, color = chip_tracks[i].split("|", 1)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid track meta '{chip_tracks[i]}'. Use 'Label|#RRGGBB'.")
-        path = os.path.join(TMP_DIR, f"{uuid.uuid4()}.bw")
-        with open(path, "wb") as f:
-            shutil.copyfileobj(bw_file.file, f)
-        bw_inputs.append((path, tr_label.strip(), color.strip()))
-        try:
-            bw_file.file.close()
-        except Exception:
-            pass
-
-    job = q.enqueue(
-        chip_overlay_compare_task,
-        session_id, label, gene, int(window), bw_inputs, per_motif_pvals_json, float(min_score_bits),
-        retry=Retry(max=2, interval=[10, 30]),
-        job_timeout="3600",
-    )
-    return {"job_id": job.get_id()}
-
 @app.get("/plots/chip-overlay-compare/{session_id}/{label}/{gene}")  # fetch
 def fetch_chip_overlay_compare(session_id: str, label: str, gene: str):
     fp = os.path.join(TMP_DIR, f"{session_id}_{label}_{gene}_chip_overlay.json")
     if not os.path.exists(fp):
         raise HTTPException(status_code=404, detail="Overlay not ready")
     return {"session_id": session_id, "label": label, "gene": gene, "chip_overlay_plot": json.load(open(fp))}
-'''
 
 @app.get("/get-tissues")
 async def get_tissues(
