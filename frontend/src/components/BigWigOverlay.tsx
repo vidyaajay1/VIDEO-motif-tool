@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import Plot from "react-plotly.js";
 
 export interface BigWigOverlayProps {
@@ -14,7 +14,15 @@ type PlotlyJSON = {
   frames?: any[];
 };
 
-/* ───────── helpers for async RQ flow ───────── */
+type TrackMeta = {
+  path: string;
+  label: string;
+  color: string;
+  sha1: string;
+};
+type TrackRegistry = Record<string, TrackMeta>; // track_id -> meta
+
+/* ───────── helpers ───────── */
 async function postJSON(url: string, body: FormData) {
   const res = await fetch(url, { method: "POST", body });
   if (!res.ok) {
@@ -27,7 +35,6 @@ async function postJSON(url: string, body: FormData) {
   }
   return res.json();
 }
-
 async function getJSON(url: string) {
   const res = await fetch(url);
   if (!res.ok) {
@@ -40,9 +47,7 @@ async function getJSON(url: string) {
   }
   return res.json();
 }
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 async function waitForJob(
   apiBase: string,
   jobId: string,
@@ -59,7 +64,7 @@ async function waitForJob(
     await sleep(intervalMs);
   }
 }
-/* ───────────────────────────────────────────── */
+/* ─────────────────────────── */
 
 const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
   dataId,
@@ -68,23 +73,95 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
   apiBase,
 }) => {
   const [gene, setGene] = useState("");
+  // New: pending uploads (only used to register once)
   const [bigwigs, setBigwigs] = useState<File[]>([]);
-  const [trackInfo, setTrackInfo] = useState<string[]>([]);
+  const [trackInfo, setTrackInfo] = useState<string[]>([]); // "Name|#RRGGBB" for pending uploads
+
+  // New: persisted registry and selection
+  const [registry, setRegistry] = useState<TrackRegistry>({});
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
   const [fig, setFig] = useState<PlotlyJSON | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const disabled = !dataId;
 
+  // Load persisted tracks when dataId changes
+  useEffect(() => {
+    (async () => {
+      if (!dataId) {
+        setRegistry({});
+        setSelectedIds([]);
+        return;
+      }
+      try {
+        const js = await getJSON(
+          `${apiBase}/tracks/${encodeURIComponent(String(dataId))}`
+        );
+        const tracks: TrackRegistry = js?.tracks || {};
+        setRegistry(tracks);
+        setSelectedIds(Object.keys(tracks)); // default: select all
+      } catch {
+        setRegistry({});
+        setSelectedIds([]);
+      }
+    })();
+  }, [dataId, apiBase]);
+
+  // Register new tracks (once), then refresh registry
+  const handleRegister = useCallback(async () => {
+    if (disabled) return;
+    if (bigwigs.length === 0 || trackInfo.length !== bigwigs.length) {
+      alert("Add .bw files and set track name & color for each.");
+      return;
+    }
+    // validate label|#RRGGBB quickly
+    if (
+      !trackInfo.every((s) => {
+        const [n, c] = s.split("|");
+        return Boolean(n) && Boolean(c);
+      })
+    ) {
+      alert("Each track needs a name and a color (Label|#RRGGBB).");
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append("data_id", String(dataId));
+    bigwigs.forEach((f) => fd.append("bigwigs", f));
+    trackInfo.forEach((s) => fd.append("tracknames", s)); // backend expects "tracknames"
+
+    setSaving(true);
+    try {
+      await postJSON(`${apiBase}/tracks/register`, fd);
+      // clear the pending uploads UI
+      setBigwigs([]);
+      setTrackInfo([]);
+
+      // reload registry
+      const js = await getJSON(
+        `${apiBase}/tracks/${encodeURIComponent(String(dataId))}`
+      );
+      const tracks: TrackRegistry = js?.tracks || {};
+      setRegistry(tracks);
+      setSelectedIds(Object.keys(tracks)); // select all by default
+    } catch (e: any) {
+      alert(e.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [disabled, bigwigs, trackInfo, dataId, apiBase]);
+
+  // Enqueue plot using persisted track_ids_json
   const handleOverlaySubmit = useCallback(async () => {
     if (disabled) return;
-
-    const infoOK = trackInfo.every((s) => {
-      const [n, c] = s.split("|");
-      return n && c;
-    });
-
-    if (!gene || bigwigs.length === 0 || !infoOK) {
-      alert("Fill gene, add files, and set track names & colors.");
+    if (!gene) {
+      alert("Pick a gene/peak.");
+      return;
+    }
+    if (selectedIds.length === 0) {
+      alert("Select at least one registered track.");
       return;
     }
 
@@ -92,51 +169,38 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
     fd.append("data_id", String(dataId));
     fd.append("gene", gene);
     fd.append("window", String(inputWindow));
-    // if you add these controls later, set them the same way:
-    // fd.append("per_motif_pvals_json", "");
-    // fd.append("min_score_bits", "0");
-    bigwigs.forEach((f) => fd.append("bigwigs", f)); // multiple files
-    trackInfo.forEach((s) => fd.append("chip_tracks", s)); // "Name|#RRGGBB"
+    fd.append("track_ids_json", JSON.stringify(selectedIds));
 
     setLoading(true);
     setFig(null);
-
     try {
-      // 1) enqueue
       const { job_id } = await postJSON(`${apiBase}/plot-chip-overlay`, fd);
-
-      // 2) wait
       await waitForJob(apiBase, job_id);
 
-      // 3) fetch artifact
       const payload = await getJSON(
         `${apiBase}/plots/chip-overlay/${encodeURIComponent(
           String(dataId)
         )}/${encodeURIComponent(gene)}`
       );
-
-      // backend returns an object for `chip_overlay_plot`
-      const plotObj = payload.chip_overlay_plot; // already parsed JSON (object)
+      const plotObj = payload.chip_overlay_plot;
       const figJSON = (
         typeof plotObj === "string" ? JSON.parse(plotObj) : plotObj
       ) as PlotlyJSON;
-
-      // Make layout responsive-friendly
       figJSON.layout = { ...figJSON.layout, autosize: true };
-
       setFig(figJSON);
     } catch (e: any) {
       alert(e.message ?? String(e));
     } finally {
       setLoading(false);
     }
-  }, [dataId, gene, bigwigs, trackInfo, inputWindow, apiBase, disabled]);
+  }, [disabled, gene, selectedIds, dataId, inputWindow, apiBase]);
 
   return (
     <div className={`card mt-4 ${disabled ? "bg-light text-muted" : ""}`}>
       <div className="card-body">
         <h5 className="card-title">Overlay ChIP/ATAC BigWig Tracks</h5>
 
+        {/* Gene / peak picker */}
         <div className="mb-3">
           <label className="form-label">Choose Peak/Gene:</label>
           <select
@@ -154,7 +218,63 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
           </select>
         </div>
 
+        {/* Registered tracks (persisted) */}
         <div className="mb-3">
+          <label className="form-label">
+            Registered Tracks (persisted for this dataId)
+          </label>
+          {Object.keys(registry).length === 0 ? (
+            <div className="form-text">
+              No tracks yet. Upload &amp; register below.
+            </div>
+          ) : (
+            <div className="d-flex flex-column gap-1">
+              {Object.entries(registry).map(([tid, meta]) => (
+                <label key={tid} className="d-flex align-items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={selectedIds.includes(tid)}
+                    onChange={(e) => {
+                      setSelectedIds((prev) =>
+                        e.target.checked
+                          ? [...new Set([...prev, tid])]
+                          : prev.filter((x) => x !== tid)
+                      );
+                    }}
+                    disabled={disabled}
+                  />
+                  <span
+                    className="badge text-bg-light"
+                    style={{ border: "1px solid #ddd" }}
+                  >
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 12,
+                        height: 12,
+                        background: meta.color,
+                        marginRight: 6,
+                        verticalAlign: "middle",
+                      }}
+                    />
+                    {meta.label}
+                  </span>
+                  <small
+                    className="text-muted text-truncate"
+                    style={{ maxWidth: 240 }}
+                  >
+                    {meta.path.split("/").pop()}
+                  </small>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Upload + register (one-time per analysis) */}
+        <div className="mb-2">
+          <label className="form-label">Add new .bw files (optional)</label>
           <input
             type="file"
             className="form-control"
@@ -228,13 +348,24 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
           </div>
         ))}
 
-        <button
-          className="btn btn-primary"
-          onClick={handleOverlaySubmit}
-          disabled={disabled || loading}
-        >
-          {loading ? "Generating…" : "Generate Overlay Plot"}
-        </button>
+        <div className="d-flex gap-2">
+          <button
+            className="btn btn-outline-secondary"
+            onClick={handleRegister}
+            disabled={disabled || saving || bigwigs.length === 0}
+            title="Upload & persist these tracks for this dataId"
+          >
+            {saving ? "Registering…" : "Register Tracks"}
+          </button>
+
+          <button
+            className="btn btn-primary"
+            onClick={handleOverlaySubmit}
+            disabled={disabled || loading || !gene || selectedIds.length === 0}
+          >
+            {loading ? "Generating…" : "Generate Overlay Plot"}
+          </button>
+        </div>
 
         {fig && (
           <div className="card mt-4">

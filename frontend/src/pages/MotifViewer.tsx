@@ -399,8 +399,6 @@ function MotifViewer() {
         const { job_id } = await postJSON(ENDPOINTS.getHitsBatch(API_BASE), fd);
         await waitForJob(job_id);
       }
-      // REMOVE this line so plots are only generated when user clicks:
-      // await handleMotifOverview();
 
       setScanVersion((v) => v + 1);
     } catch (e: any) {

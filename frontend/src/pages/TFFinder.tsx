@@ -57,8 +57,8 @@ const TFFinder: React.FC = () => {
               }
             >
               <option value="">Select stage</option>
-              <option value="10-12">10–12</option>
-              <option value="13-16">13–16</option>
+              <option value="10-12">10-12</option>
+              <option value="13-16">13-16</option>
             </Form.Select>
           </Col>
 
@@ -155,7 +155,7 @@ const TFFinder: React.FC = () => {
                   window.open(url, "_blank");
                 }}
               >
-                Download Full Gene List (CSV)
+                Download Full DE Gene List (CSV)
               </Button>
             </div>
           </Card>

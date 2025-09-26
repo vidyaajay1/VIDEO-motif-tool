@@ -21,11 +21,14 @@ from app.tasks import (
     chip_overlay_compare_task,
     run_streme_task)
 from app.new_process_input import process_genomic_input, get_motif_list
-from app.run_streme import write_fasta_from_genes, run_streme_on_fasta, parse_streme_results
 from app.process_tomtom import subset_by_genes
 from app.filter_tfs import filter_tfs_from_gene_list
 from app.utils import clear_tmp_dir
 from app.mem_logger import start_mem_logger
+from app.track_store import (
+    persist_tracks, list_tracks, remove_track,
+    _ns_key_for_regular, _ns_key_for_compare, resolve_inputs
+)
 import app.models as models
 from pathlib import Path
 
@@ -67,16 +70,6 @@ app = FastAPI(lifespan=lifespan)
 os.makedirs(TMP_DIR, exist_ok=True)
 
 
-###
-import logging
-logger = logging.getLogger("uvicorn")
-logger.info(f"[VIDEO] TMP_DIR set to: {TMP_DIR}")
-if not TMP_DIR.exists():
-    logger.error(f"[VIDEO] TMP_DIR does not exist: {TMP_DIR}")
-else:
-    # Show what's currently inside
-    logger.info(f"[VIDEO] TMP_DIR contents: {list(TMP_DIR.iterdir())}")
-###
 app.mount("/api/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
 app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp_alt") #backup compatibility mount
 app.mount("/api/static", StaticFiles(directory="app/static"), name="static")
@@ -279,8 +272,8 @@ async def get_genomic_input_compare(
     window_size: int = Form(500),
 ):
     # build datasets
-    data_id_a, peaks_a, lfc_a, peak_list_a = _create_dataset_from_inputs(bed_file_a, gene_list_file_a, window_size)
-    data_id_b, peaks_b, lfc_b, peak_list_b = _create_dataset_from_inputs(bed_file_b, gene_list_file_b, window_size)
+    data_id_a, _,_ ,peak_list_a = _create_dataset_from_inputs(bed_file_a, gene_list_file_a, window_size)
+    data_id_b, _, _, peak_list_b = _create_dataset_from_inputs(bed_file_b, gene_list_file_b, window_size)
 
     session_id = uuid.uuid4().hex
     datasets = [
@@ -654,8 +647,102 @@ def download_filtered_compare(session_id: str, merged: bool = True):
             raise HTTPException(status_code=404, detail="ZIP not found (did you request split+download?)")
         return Response(open(fp,"rb").read(), media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename=\"{session_id}_filtered_final_hits.zip\"'})
+    
 
 
+# ---------- Regular mode ----------
+
+@app.post("/tracks/register")
+async def register_tracks(
+    data_id: str = Form(...),
+    bigwigs: List[UploadFile] = File(...),
+    tracknames: List[str] = Form(...),  # ["Label|#RRGGBB", ...]
+):
+    ns = _ns_key_for_regular(data_id)
+    track_ids = persist_tracks(ns, bigwigs, tracknames)
+    return {"data_id": data_id, "registered": track_ids}
+
+@app.get("/tracks/{data_id}")
+def get_tracks(data_id: str):
+    ns = _ns_key_for_regular(data_id)
+    return {"data_id": data_id, "tracks": list_tracks(ns)}
+
+@app.delete("/tracks/{data_id}/{track_id}")
+def delete_track(data_id: str, track_id: str):
+    ns = _ns_key_for_regular(data_id)
+    remove_track(ns, track_id)
+    return {"ok": True, "data_id": data_id, "track_id": track_id}
+
+# ---------- Compare mode (namespaced by session_id + label) ----------
+
+@app.post("/tracks/register-compare")
+async def register_tracks_compare(
+    session_id: str = Form(...),
+    label: str = Form(...),  # e.g. "GroupA" (this is the cohort label, not the per-track label)
+    bigwigs: List[UploadFile] = File(...),
+    tracknames: List[str] = Form(...),
+):
+    ns = _ns_key_for_compare(session_id, label)
+    track_ids = persist_tracks(ns, bigwigs, tracknames)
+    return {"session_id": session_id, "label": label, "registered": track_ids}
+
+@app.get("/tracks-compare/{session_id}/{label}")
+def get_tracks_compare(session_id: str, label: str):
+    ns = _ns_key_for_compare(session_id, label)
+    return {"session_id": session_id, "label": label, "tracks": list_tracks(ns)}
+
+@app.delete("/tracks-compare/{session_id}/{label}/{track_id}")
+def delete_track_compare(session_id: str, label: str, track_id: str):
+    ns = _ns_key_for_compare(session_id, label)
+    remove_track(ns, track_id)
+    return {"ok": True, "session_id": session_id, "label": label, "track_id": track_id}
+
+
+@app.post("/plot-chip-overlay")  # enqueue using persisted tracks
+async def plot_chip_overlay_enqueue(
+    data_id: str = Form(...),
+    gene: str = Form(...),
+    window: int = Form(500),
+    per_motif_pvals_json: str = Form(default=""),
+    min_score_bits: float = Form(0.0),
+    track_ids_json: Optional[str] = Form(None),  # optional: json list of track_ids
+):
+    # Resolve persisted bw inputs
+    ns = _ns_key_for_regular(data_id)
+    track_ids = json.loads(track_ids_json) if track_ids_json else None
+    bw_inputs = resolve_inputs(ns, track_ids)
+
+    job = q.enqueue(
+        chip_overlay_single_task,
+        data_id, gene, int(window), bw_inputs, per_motif_pvals_json, float(min_score_bits),
+        retry=Retry(max=2, interval=[10, 30]),
+        job_timeout="3600",
+    )
+    return {"job_id": job.get_id()}
+
+@app.post("/plot-chip-overlay-compare")  # enqueue using persisted tracks
+async def plot_chip_overlay_compare_enqueue(
+    session_id: str = Form(...),
+    label: str = Form(...),             # cohort namespace
+    gene: str = Form(...),
+    window: int = Form(500),
+    per_motif_pvals_json: str = Form(default=""),
+    min_score_bits: float = Form(0.0),
+    track_ids_json: Optional[str] = Form(None),  # optional
+):
+    ns = _ns_key_for_compare(session_id, label)
+    track_ids = json.loads(track_ids_json) if track_ids_json else None
+    bw_inputs = resolve_inputs(ns, track_ids)
+
+    job = q.enqueue(
+        chip_overlay_compare_task,
+        session_id, label, gene, int(window), bw_inputs, per_motif_pvals_json, float(min_score_bits),
+        retry=Retry(max=2, interval=[10, 30]),
+        job_timeout="3600",
+    )
+    return {"job_id": job.get_id()}
+
+'''
 @app.post("/plot-chip-overlay")  # enqueue
 async def plot_chip_overlay_enqueue(
     data_id: str = Form(...),
@@ -743,7 +830,7 @@ def fetch_chip_overlay_compare(session_id: str, label: str, gene: str):
     if not os.path.exists(fp):
         raise HTTPException(status_code=404, detail="Overlay not ready")
     return {"session_id": session_id, "label": label, "gene": gene, "chip_overlay_plot": json.load(open(fp))}
-
+'''
 
 @app.get("/get-tissues")
 async def get_tissues(

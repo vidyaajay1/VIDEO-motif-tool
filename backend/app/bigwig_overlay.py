@@ -4,20 +4,14 @@ import pyBigWig
 import pandas as pd
 import numpy as np
 from typing import List, Tuple, Optional, Dict
-
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-# pull helpers from your new plotting module
 from app.plotting import (
     _as_motif_specs,
     _rgba_with_alpha,
     filter_hits_by_per_motif_pvals,
 )
 
-# --------------------------------------------------------------------
-# part 6: overlay chip/atac track plot
-# --------------------------------------------------------------------
 def fetch_bw_coverage(
     peak_id: str,
     peaks_df: pd.DataFrame,

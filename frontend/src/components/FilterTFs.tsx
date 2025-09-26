@@ -134,7 +134,7 @@ const FilterTFs: React.FC = () => {
                 <th>Gene Symbol</th>
                 <th>FlyBase ID</th>
                 <th>Motif ID</th>
-                <th>View PFM</th>
+                <th>View PWM</th>
               </tr>
             </thead>
             <tbody>
@@ -168,7 +168,7 @@ const FilterTFs: React.FC = () => {
                             <div className="d-flex flex-column flex-md-row gap-4 align-items-start">
                               {/* PFM Display */}
                               <div className="flex-fill">
-                                <strong>Position Frequency Matrix (PFM)</strong>
+                                <strong>Position Weight Matrix (PWM)</strong>
                                 <pre className="mb-0 mt-2">
                                   {tf.pfm
                                     .map((row) =>
