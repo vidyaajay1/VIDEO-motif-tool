@@ -198,14 +198,115 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
   return (
     <div className={`card mt-4 ${disabled ? "bg-light text-muted" : ""}`}>
       <div className="card-body">
-        <h5 className="card-title">Overlay ChIP/ATAC BigWig Tracks</h5>
+        <h5 className="card-title mb-4">Overlay ChIP/ATAC BigWig Tracks</h5>
 
-        {/* Registered tracks (persisted) */}
-        <div className="mb-3">
-          <label className="form-label">Choose from Uploaded Tracks</label>
+        {/* 1. Add up to three tracks and process them */}
+        <div className="mb-4">
+          <div className="d-flex align-items-baseline justify-content-between mb-2">
+            <span className="fw-semibold">
+              1. Add up to three tracks and process them
+            </span>
+          </div>
+
+          <div className="mb-2">
+            <input
+              type="file"
+              className="form-control"
+              multiple
+              accept=".bw,.bigwig"
+              onChange={(e) => {
+                if (disabled) return;
+                const files = Array.from(e.target.files ?? []);
+                if (!files.length) return;
+                setBigwigs((prev) => [...prev, ...files].slice(0, 3));
+                setTrackInfo((prev) =>
+                  [...prev, ...files.map(() => "|")].slice(0, 3)
+                );
+                e.currentTarget.value = "";
+              }}
+              disabled={disabled}
+            />
+          </div>
+
+          {bigwigs.length > 0 && (
+            <div className="mb-2">
+              {bigwigs.map((file, idx) => (
+                <div key={idx} className="d-flex align-items-center mb-2">
+                  <small
+                    className="flex-grow-1 text-truncate"
+                    style={{ maxWidth: 200 }}
+                  >
+                    {file.name}
+                  </small>
+
+                  {/* Optional inline name/color (kept from your original) */}
+                  <input
+                    type="text"
+                    className="form-control form-control-sm me-2"
+                    placeholder="Track name"
+                    value={trackInfo[idx]?.split("|")[0] ?? ""}
+                    onChange={(e) => {
+                      const [, c = ""] = (trackInfo[idx] || "|").split("|");
+                      const name = e.target.value;
+                      setTrackInfo((t) => {
+                        const copy = [...t];
+                        copy[idx] = `${name}|${c}`;
+                        return copy;
+                      });
+                    }}
+                    disabled={disabled}
+                  />
+                  <input
+                    type="color"
+                    className="form-control form-control-color form-control-sm me-2"
+                    value={trackInfo[idx]?.split("|")[1] || "#000000"}
+                    onChange={(e) => {
+                      const [n = ""] = (trackInfo[idx] || "|").split("|");
+                      const color = e.target.value;
+                      setTrackInfo((t) => {
+                        const copy = [...t];
+                        copy[idx] = `${n}|${color}`;
+                        return copy;
+                      });
+                    }}
+                    disabled={disabled}
+                  />
+                  <button
+                    className="btn btn-sm btn-outline-danger"
+                    onClick={() => {
+                      if (disabled) return;
+                      setBigwigs((b) => b.filter((_, i) => i !== idx));
+                      setTrackInfo((t) => t.filter((_, i) => i !== idx));
+                    }}
+                    disabled={disabled}
+                    aria-label="Remove file"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            className="btn btn-outline-secondary"
+            onClick={handleRegister}
+            disabled={disabled || saving || bigwigs.length === 0}
+            title="Upload & persist these tracks for this dataId"
+          >
+            {saving ? "Processing…" : "Process Tracks"}
+          </button>
+        </div>
+
+        {/* 2. Choose the tracks you want to visualize */}
+        <div className="mb-4">
+          <div className="fw-semibold mb-2">
+            2. Choose the tracks you want to visualize
+          </div>
+
           {Object.keys(registry).length === 0 ? (
             <div className="form-text">
-              No tracks yet. Upload &amp; click Process Tracks below.
+              No tracks yet. Upload and click Process Tracks above.
             </div>
           ) : (
             <div className="d-flex flex-column gap-1">
@@ -252,110 +353,27 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
           )}
         </div>
 
-        {/* Upload + register (one-time per analysis) */}
-        <div className="mb-2">
-          <label className="form-label">
-            Add new .bw/.bigwig files (up to three)
-          </label>
-          <input
-            type="file"
-            className="form-control"
-            multiple
-            accept=".bw,.bigwig"
-            onChange={(e) => {
-              if (disabled) return;
-              const files = Array.from(e.target.files ?? []);
-              if (!files.length) return;
-              setBigwigs((prev) => [...prev, ...files]);
-              setTrackInfo((prev) => [...prev, ...files.map(() => "|")]);
-              e.currentTarget.value = "";
-            }}
+        {/* 3. Pick gene */}
+        <div className="mb-4">
+          <div className="fw-semibold mb-2">3. Pick gene</div>
+          <select
+            className="form-select"
+            value={gene}
+            onChange={(e) => setGene(e.target.value)}
             disabled={disabled}
-          />
+          >
+            <option value="">-- pick one --</option>
+            {peakList.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {bigwigs.map((file, idx) => (
-          <div key={idx} className="d-flex align-items-center mb-2">
-            <small
-              className="flex-grow-1 text-truncate"
-              style={{ maxWidth: 160 }}
-            >
-              {file.name}
-            </small>
-
-            <input
-              type="text"
-              className="form-control form-control-sm me-2"
-              placeholder="Track name"
-              value={trackInfo[idx]?.split("|")[0] ?? ""}
-              onChange={(e) => {
-                const [, c = ""] = (trackInfo[idx] || "|").split("|");
-                const name = e.target.value;
-                setTrackInfo((t) => {
-                  const copy = [...t];
-                  copy[idx] = `${name}|${c}`;
-                  return copy;
-                });
-              }}
-              disabled={disabled}
-            />
-
-            <input
-              type="color"
-              className="form-control form-control-color form-control-sm me-2"
-              value={trackInfo[idx]?.split("|")[1] || "#000000"}
-              onChange={(e) => {
-                const [n = ""] = (trackInfo[idx] || "|").split("|");
-                const color = e.target.value;
-                setTrackInfo((t) => {
-                  const copy = [...t];
-                  copy[idx] = `${n}|${color}`;
-                  return copy;
-                });
-              }}
-              disabled={disabled}
-            />
-
-            <button
-              className="btn btn-sm btn-outline-danger"
-              onClick={() => {
-                if (disabled) return;
-                setBigwigs((b) => b.filter((_, i) => i !== idx));
-                setTrackInfo((t) => t.filter((_, i) => i !== idx));
-              }}
-              disabled={disabled}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-
-        <div className="d-flex gap-2">
-          <button
-            className="btn btn-outline-secondary"
-            onClick={handleRegister}
-            disabled={disabled || saving || bigwigs.length === 0}
-            title="Upload & persist these tracks for this dataId"
-          >
-            {saving ? "Registering…" : "Process Tracks"}
-          </button>
-          {/* Gene / peak picker */}
-          <div className="mb-3">
-            <label className="form-label">Choose Peak/Gene:</label>
-            <select
-              className="form-select"
-              value={gene}
-              onChange={(e) => setGene(e.target.value)}
-              disabled={disabled}
-            >
-              <option value="">-- pick one --</option>
-              {peakList.map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* 4. Generate Plot */}
+        <div className="mb-2">
+          <div className="fw-semibold mb-2">4. Generate Plot</div>
           <button
             className="btn btn-primary"
             onClick={handleOverlaySubmit}
@@ -365,6 +383,7 @@ const BigWigOverlay: React.FC<BigWigOverlayProps> = ({
           </button>
         </div>
 
+        {/* Figure */}
         {fig && (
           <div className="card mt-4">
             <div className="card-body">
