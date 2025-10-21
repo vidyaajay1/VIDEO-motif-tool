@@ -525,21 +525,20 @@ function MotifViewer() {
       <Container className="my-4">
         <h2 className="text-center mb-4">Motif Viewer</h2>
 
-        {/* Stepper Nav grouped into INPUT / OUTPUT */}
-        <div className="d-flex flex-column align-items-center gap-3 mb-4">
+        {/* Stepper Nav grouped side-by-side */}
+        <div className="d-flex justify-content-center align-items-start gap-4 mb-4 flex-wrap">
           {/* INPUT box */}
           <div
-            className="p-3 rounded shadow-sm w-100"
+            className="p-3 rounded shadow-sm flex-fill"
             style={{
-              backgroundColor: "#f8f9fa", // light gray
-              maxWidth: "800px",
+              backgroundColor: "#fff8dc", // light yellow (Cornsilk)
+              maxWidth: "600px",
+              minWidth: "300px",
             }}
           >
-            <h5 className="text-center text-secondary mb-3 fw-semibold">
-              INPUT
-            </h5>
+            <h5 className="text-center text-dark mb-3 fw-semibold">INPUT</h5>
             <Nav variant="pills" className="justify-content-center flex-wrap">
-              {steps.slice(0, 3).map((label, idx) => (
+              {steps.slice(0, 4).map((label, idx) => (
                 <Nav.Item key={idx}>
                   <Nav.Link
                     active={activeStep === idx}
@@ -554,23 +553,22 @@ function MotifViewer() {
 
           {/* OUTPUT box */}
           <div
-            className="p-3 rounded shadow-sm w-100"
+            className="p-3 rounded shadow-sm flex-fill"
             style={{
-              backgroundColor: "#f1f3f5", // slightly darker gray
-              maxWidth: "800px",
+              backgroundColor: "#fff3b0", // soft pastel yellow
+              maxWidth: "400px",
+              minWidth: "250px",
             }}
           >
-            <h5 className="text-center text-secondary mb-3 fw-semibold">
-              OUTPUT
-            </h5>
+            <h5 className="text-center text-dark mb-3 fw-semibold">OUTPUT</h5>
             <Nav variant="pills" className="justify-content-center flex-wrap">
-              {steps.slice(3).map((label, idx) => (
-                <Nav.Item key={idx + 3}>
+              {steps.slice(4).map((label, idx) => (
+                <Nav.Item key={idx + 4}>
                   <Nav.Link
-                    active={activeStep === idx + 3}
-                    onClick={() => setActiveStep((idx + 3) as Step)}
+                    active={activeStep === idx + 4}
+                    onClick={() => setActiveStep((idx + 4) as Step)}
                   >
-                    {idx + 4}. {label}
+                    {idx + 5}. {label}
                   </Nav.Link>
                 </Nav.Item>
               ))}
