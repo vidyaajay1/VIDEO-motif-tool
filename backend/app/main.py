@@ -949,7 +949,7 @@ def download_streme_file(tmp_id: str):
     if not os.path.isfile(file_path):
         return Response(content=f"File not found: {file_path}", status_code=404)
     return FileResponse(path=file_path, filename=f"streme_{tmp_id}.txt", media_type="text/plain")
-
+'''
 @app.post("/process-tomtom")
 async def process_tomtom(
     tsv_file: UploadFile = File(...),
@@ -975,7 +975,7 @@ async def process_tomtom(
     )
 
     return {"pairs": out}
-
+'''
 @app.post("/filter-tfs")
 async def filter_tfs(
     use_de_genes: bool = Form(...),

@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { Container, Row, Col, Form, Button, Card } from "react-bootstrap";
 import StremeDiscoveryCard from "../components/StremeDiscoveryCard";
 import { useTFContext } from "../context/TFContext";
-import ProcessTomtom from "../components/ProcessTomtom";
+//import ProcessTomtom from "../components/ProcessTomtom";
 import FilterTFs from "../components/FilterTFs";
 
 // const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
@@ -163,6 +163,7 @@ const TFFinder: React.FC = () => {
       </Card>
       <FilterTFs />
       <StremeDiscoveryCard selectedStage={stage} selectedTissue={tissue} />
+      {/* 
       <div className="mt-4">
         <small className="text">
           We recommend that you run the motif discovery results through a motif
@@ -181,6 +182,7 @@ const TFFinder: React.FC = () => {
         </small>
         <ProcessTomtom top250Genes={top250Genes} />
       </div>
+      */}
     </Container>
   );
 };
