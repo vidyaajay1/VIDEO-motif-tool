@@ -118,7 +118,7 @@ export default function GetMotifInput({
                 style={{ backgroundColor: "#e9f7ef", borderColor: "#4caf50" }}
               >
                 <option value="iupac">IUPAC</option>
-                <option value="pwm">PWM</option>
+                <option value="pwm">PWM/PFM</option>
                 <option value="pcm">PCM</option>
               </Form.Select>
             </Col>

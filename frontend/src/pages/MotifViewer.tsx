@@ -525,19 +525,58 @@ function MotifViewer() {
       <Container className="my-4">
         <h2 className="text-center mb-4">Motif Viewer</h2>
 
-        {/* Stepper Nav */}
-        <Nav variant="pills" className="justify-content-center mb-4">
-          {steps.map((label, idx) => (
-            <Nav.Item key={idx}>
-              <Nav.Link
-                active={activeStep === idx}
-                onClick={() => setActiveStep(idx as Step)}
-              >
-                {idx + 1}. {label}
-              </Nav.Link>
-            </Nav.Item>
-          ))}
-        </Nav>
+        {/* Stepper Nav grouped into INPUT / OUTPUT */}
+        <div className="d-flex flex-column align-items-center gap-3 mb-4">
+          {/* INPUT box */}
+          <div
+            className="p-3 rounded shadow-sm w-100"
+            style={{
+              backgroundColor: "#f8f9fa", // light gray
+              maxWidth: "800px",
+            }}
+          >
+            <h5 className="text-center text-secondary mb-3 fw-semibold">
+              INPUT
+            </h5>
+            <Nav variant="pills" className="justify-content-center flex-wrap">
+              {steps.slice(0, 3).map((label, idx) => (
+                <Nav.Item key={idx}>
+                  <Nav.Link
+                    active={activeStep === idx}
+                    onClick={() => setActiveStep(idx as Step)}
+                  >
+                    {idx + 1}. {label}
+                  </Nav.Link>
+                </Nav.Item>
+              ))}
+            </Nav>
+          </div>
+
+          {/* OUTPUT box */}
+          <div
+            className="p-3 rounded shadow-sm w-100"
+            style={{
+              backgroundColor: "#f1f3f5", // slightly darker gray
+              maxWidth: "800px",
+            }}
+          >
+            <h5 className="text-center text-secondary mb-3 fw-semibold">
+              OUTPUT
+            </h5>
+            <Nav variant="pills" className="justify-content-center flex-wrap">
+              {steps.slice(3).map((label, idx) => (
+                <Nav.Item key={idx + 3}>
+                  <Nav.Link
+                    active={activeStep === idx + 3}
+                    onClick={() => setActiveStep((idx + 3) as Step)}
+                  >
+                    {idx + 4}. {label}
+                  </Nav.Link>
+                </Nav.Item>
+              ))}
+            </Nav>
+          </div>
+        </div>
 
         {/* Wizard Content */}
         <Card className="mb-3">
