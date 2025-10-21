@@ -518,6 +518,23 @@ function MotifViewer() {
   const validatedMotifNames = validatedMotifs
     .map((m) => m.name)
     .filter(Boolean);
+  useEffect(() => {
+    if (isCompare) {
+      setDataType("genes"); // compare always uses gene lists
+      setBedFile(null); // clear bed to avoid confusion
+    } else {
+      // optional: clear compare-only fields when leaving compare
+      setGeneListFileA(null);
+      setGeneListFileB(null);
+      setLabelA("A");
+      setLabelB("B");
+    }
+    // also clear any previous plots / statuses that might confuse UI
+    setOverviewFigureJson(null);
+    setFilteredOverviewFigureJson(null);
+    setOverviewFiguresByLabel({});
+    setFilteredFiguresByLabel({});
+  }, [isCompare]);
 
   // ---------- Render ----------
   return (
@@ -618,9 +635,16 @@ function MotifViewer() {
                     isCompare
                       ? handleGetGenomicInputCompare
                       : handleGetGenomicInput
-                  } // <-- IMPORTANT
+                  }
                   canProcess={
-                    dataType === "bed"
+                    isCompare
+                      ? Boolean(
+                          geneListFileA &&
+                            geneListFileB &&
+                            labelA.trim() &&
+                            labelB.trim()
+                        )
+                      : dataType === "bed"
                       ? Boolean(bedFile)
                       : Boolean(geneListFile)
                   }
