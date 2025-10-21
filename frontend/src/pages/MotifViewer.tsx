@@ -556,7 +556,7 @@ function MotifViewer() {
             className="p-3 rounded shadow-sm flex-fill"
             style={{
               backgroundColor: "#fff3b0", // soft pastel yellow
-              maxWidth: "300px",
+              maxWidth: "400px",
               minWidth: "250px",
             }}
           >
