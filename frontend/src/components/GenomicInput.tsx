@@ -151,7 +151,7 @@ export default function GenomicInput({
     URL.revokeObjectURL(url);
   };
   const showFileChooser =
-    dataType === "bed" || (dataType === "genes" && geneInputMode === "upload");
+    dataType === "bed" || (dataType === "genes" && geneInputMode === "typed");
 
   if (compareMode) {
     return (

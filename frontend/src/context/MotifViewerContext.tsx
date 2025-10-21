@@ -91,7 +91,7 @@ export const useMotifViewer = () => {
 };
 
 export const MotifViewerProvider = ({ children }: { children: ReactNode }) => {
-  const [dataType, setDataType] = useState<DataType>("bed");
+  const [dataType, setDataType] = useState<DataType>("genes");
   const [bedFile, setBedFile] = useState<File | null>(null);
 
   // legacy single-list
