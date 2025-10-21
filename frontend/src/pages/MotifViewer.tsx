@@ -532,7 +532,7 @@ function MotifViewer() {
             className="p-3 rounded shadow-sm flex-fill"
             style={{
               backgroundColor: "#fff8dc", // light yellow (Cornsilk)
-              maxWidth: "600px",
+              maxWidth: "700px",
               minWidth: "300px",
             }}
           >
@@ -556,7 +556,7 @@ function MotifViewer() {
             className="p-3 rounded shadow-sm flex-fill"
             style={{
               backgroundColor: "#fff3b0", // soft pastel yellow
-              maxWidth: "400px",
+              maxWidth: "300px",
               minWidth: "250px",
             }}
           >
