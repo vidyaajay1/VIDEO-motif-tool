@@ -172,10 +172,25 @@ const Tutorial: React.FC = () => {
                 <strong>Sort by motif</strong>, then sort by{" "}
                 <em>Number of Hits</em> or <em>Motif Match Score</em>.
                 Optionally show only best transcript per gene for the selected
-                motif.
+                motif. ALWAYS click on <strong>Generate Plot</strong> to apply
+                the settings and update the plot.
               </>
             ),
-            img: "/tutorial/fig-4_settings.png",
+            img: "/tutorial/fig-4_settings1.png",
+          },
+          {
+            title: "View Motif Hits Separately",
+            text: (
+              <>
+                At the top right corner of the plot, you can see a motif legend.
+                Click on a motif in the legend to hide its hits, and double
+                click on a motif to isolate it and view only that motif's hits.
+              </>
+            ),
+            imgs: [
+              "/tutorial/fig-4_settings2.png",
+              "/tutorial/fig-4_settings3.png",
+            ],
           },
           {
             title: "Per-Motif Stringency",
@@ -183,9 +198,11 @@ const Tutorial: React.FC = () => {
               <>
                 Under <strong>Motif p-value thresholds</strong>, fine-tune
                 individual motif thresholds with sliders to tighten or relax
-                matches.
+                matches. Drag the slider to the left to make only the most
+                significant matches remain.
               </>
             ),
+            img: "/tutorial/fig-4_settingsMotif.png",
           },
           {
             title: "Update & Download",
@@ -212,8 +229,8 @@ const Tutorial: React.FC = () => {
                 windows, aligned at <strong>TSS = 0</strong> and oriented so
                 upstream is left and downstream is right. Darker marks =
                 stronger matches. Hover to see matched sequence, coordinates,
-                strand, p-value, and score. Use the built-in toolbar to zoom,
-                reset, and download the figure.
+                strand, p-value, and score. Use the built-in toolbar at the top
+                left to zoom, reset, and download the figure.
               </>
             ),
             img: "/tutorial/fig-4_plot_hover.png",
@@ -237,7 +254,10 @@ const Tutorial: React.FC = () => {
                 read values and coordinates.
               </>
             ),
-            img: "/tutorial/fig-s2_overlay.png",
+            imgs: [
+              "/tutorial/fig-s2_overlay1.png",
+              "/tutorial/fig-s2_overlay2.png",
+            ],
           },
         ],
       },
@@ -252,7 +272,8 @@ const Tutorial: React.FC = () => {
                 You can now (1) build motif plots from DE gene sets, (2) compare
                 conditions, (3) refine with ATAC/ChIP filters, and (4) overlay
                 BigWig signals. Continue exploring with your own data or curated
-                sets.
+                sets. For any further help/questions about VIDEO please contact
+                vajay1@jh.edu and we will get back to you!
               </>
             ),
           },
