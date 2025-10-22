@@ -47,8 +47,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-2a_sidebar.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Open Motif Viewer",
           },
         ],
       },
@@ -68,8 +66,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-2b_stage_tissue.png",
-            ctaHref: "/tf-finder",
-            ctaLabel: "Open TF Finder",
           },
           {
             title: "Filter the List for Transcription Factors",
@@ -81,8 +77,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-2c_tf_filter.png",
-            ctaHref: "/tf-finder",
-            ctaLabel: "Filter for TFs",
           },
           {
             title: "Discover Motifs (If None Reported)",
@@ -96,8 +90,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-2d_streme.png",
-            ctaHref: "/tf-finder",
-            ctaLabel: "Run STREME",
           },
         ],
       },
@@ -118,8 +110,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-3a_genomic_input.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Process Genomic Input",
           },
           {
             title: "Provide Motif Input",
@@ -132,8 +122,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-3b_motif_input.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Process Motifs",
           },
           {
             title: "Scan for Motif Occurrences",
@@ -145,8 +133,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-3c_fimo.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Scan FIMO",
           },
           {
             title: "Integrate ATAC-seq and ChIP-seq Peaks (Optional)",
@@ -159,8 +145,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-3d_atac_chip.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Filter Motif Hits",
           },
         ],
       },
@@ -181,8 +165,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-4_settings.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Open Plot Settings",
           },
           {
             title: "Per-Motif Stringency",
@@ -245,8 +227,6 @@ const Tutorial: React.FC = () => {
               </>
             ),
             img: "/tutorial/fig-s2_overlay.png",
-            ctaHref: "/motif-viewer",
-            ctaLabel: "Open Overlay View",
           },
         ],
       },
@@ -300,11 +280,6 @@ const Tutorial: React.FC = () => {
                 </ListGroup.Item>
               ))}
             </ListGroup>
-
-            <Alert variant="info" className="mt-3">
-              Put screenshots in <code>/public/tutorial/</code> and update paths
-              as needed.
-            </Alert>
           </div>
         </Col>
 
