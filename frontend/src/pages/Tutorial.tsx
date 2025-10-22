@@ -1,11 +1,9 @@
 // pages/Tutorial.tsx
 import React, { useMemo } from "react";
 import {
-  Accordion,
   Alert,
   Badge,
   Button,
-  Card,
   Col,
   Container,
   Image,
@@ -13,13 +11,10 @@ import {
   Row,
 } from "react-bootstrap";
 
-// Optional: if you're using react-router
-// import { Link } from "react-router-dom";
-
 type Step = {
   title: string;
   text: React.ReactNode;
-  img?: string; // public/ path, e.g., "/tutorial/fig-2a_sidebar.png"
+  img?: string; // e.g., "/tutorial/fig-2a_sidebar.png"
   ctaHref?: string; // route to open the relevant page
   ctaLabel?: string;
 };
@@ -32,7 +27,6 @@ type Section = {
 };
 
 const Tutorial: React.FC = () => {
-  // Centralized content so you can edit copy/screenshots later
   const sections: Section[] = useMemo(
     () => [
       {
@@ -61,7 +55,7 @@ const Tutorial: React.FC = () => {
       {
         id: "tf-finder",
         title: "Step 1 — Using TF Finder to Acquire Gene & Motif Data",
-        figureHint: "Fig 2B-2D",
+        figureHint: "Fig 2B–2D",
         steps: [
           {
             title: "Identify Gene Sets of Interest",
@@ -110,7 +104,7 @@ const Tutorial: React.FC = () => {
       {
         id: "motif-viewer-setup",
         title: "Step 2 — Using Motif Viewer to Create Motif Hit Plots",
-        figureHint: "Fig 3A-3D",
+        figureHint: "Fig 3A–3D",
         steps: [
           {
             title: "Set Up Genomic Input",
@@ -282,18 +276,15 @@ const Tutorial: React.FC = () => {
       <Row className="g-4">
         {/* TOC */}
         <Col lg={3}>
-          <Card className="sticky-top" style={{ top: "84px" }}>
-            <Card.Header>
-              <strong>Tutorial</strong>
-            </Card.Header>
-            <ListGroup variant="flush">
+          <div className="position-sticky" style={{ top: 84 }}>
+            <h5 className="mb-3">Tutorial</h5>
+            <ListGroup>
               {sections.map((s) => (
                 <ListGroup.Item key={s.id}>
                   <a
                     href={`#${s.id}`}
                     className="text-decoration-none"
                     onClick={(e) => {
-                      // Smooth scroll
                       e.preventDefault();
                       const el = document.getElementById(s.id);
                       if (el) el.scrollIntoView({ behavior: "smooth" });
@@ -302,96 +293,82 @@ const Tutorial: React.FC = () => {
                     {s.title}
                   </a>
                   {s.figureHint && (
-                    <div className="small text-muted mt-1">
+                    <div className="small text-muted">
                       <em>{s.figureHint}</em>
                     </div>
                   )}
                 </ListGroup.Item>
               ))}
             </ListGroup>
-          </Card>
+
+            <Alert variant="info" className="mt-3">
+              Put screenshots in <code>/public/tutorial/</code> and update paths
+              as needed.
+            </Alert>
+          </div>
         </Col>
 
         {/* Content */}
         <Col lg={9}>
-          <div className="mb-4">
+          <header className="mb-4">
             <h2 className="mb-2">Tutorial: Walkthrough Guide</h2>
             <p className="text-muted mb-0">
-              Follow these steps to go from gene lists to motif discovery,
-              motif-hit plots, and optional ATAC/ChIP overlays.
+              From gene lists to motif discovery, motif-hit plots, and optional
+              ATAC/ChIP overlays.
             </p>
-          </div>
+          </header>
 
-          <Alert variant="info">
-            <div className="fw-semibold mb-1">Tip</div>
-            You can replace placeholder screenshots in{" "}
-            <code>/public/tutorial/</code> with your own images. All buttons
-            link to in-app routes — update paths if your router uses different
-            URLs.
-          </Alert>
+          {/* Plain, scrollable HTML-like content */}
+          {sections.map((section, sIdx) => (
+            <section id={section.id} key={section.id} className="mb-5">
+              <h3 className="mb-2">{section.title}</h3>
+              {section.figureHint && (
+                <div className="small text-muted mb-3">
+                  <em>{section.figureHint}</em>
+                </div>
+              )}
 
-          <Accordion alwaysOpen defaultActiveKey={["0"]}>
-            {sections.map((section, sIdx) => (
-              <Accordion.Item eventKey={String(sIdx)} key={section.id}>
-                <Accordion.Header id={section.id}>
-                  <div>
-                    <div className="fw-semibold">{section.title}</div>
-                    {section.figureHint && (
-                      <div className="small text-muted">
-                        {section.figureHint}
+              {section.steps.map((step, i) => (
+                <div key={`${section.id}-${i}`} className="mb-4">
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <Badge bg="dark">
+                      {sIdx + 1}.{i + 1}
+                    </Badge>
+                    <strong>{step.title}</strong>
+                  </div>
+
+                  <div className="mb-2">{step.text}</div>
+
+                  <div className="d-flex flex-wrap align-items-start gap-3">
+                    {step.ctaHref && (
+                      <div>
+                        <Button variant="primary" href={step.ctaHref}>
+                          {step.ctaLabel ?? "Open"}
+                        </Button>
                       </div>
                     )}
+                    {step.img && (
+                      <figure style={{ maxWidth: 640 }}>
+                        <Image
+                          src={step.img}
+                          alt={step.title}
+                          fluid
+                          rounded
+                          style={{ border: "1px solid #eee" }}
+                        />
+                        <figcaption className="small text-muted mt-1">
+                          Placeholder screenshot
+                        </figcaption>
+                      </figure>
+                    )}
                   </div>
-                </Accordion.Header>
-                <Accordion.Body>
-                  {section.steps.map((step, i) => (
-                    <Card className="mb-3" key={`${section.id}-${i}`}>
-                      <Card.Body>
-                        <div className="d-flex justify-content-between align-items-start gap-3">
-                          <div style={{ flex: 1 }}>
-                            <div className="d-flex align-items-center gap-2 mb-2">
-                              <Badge bg="dark">
-                                {sIdx + 1}.{i + 1}
-                              </Badge>
-                              <strong>{step.title}</strong>
-                            </div>
-                            <div className="mb-3">{step.text}</div>
-                            {step.ctaHref && (
-                              <>
-                                {/* If using react-router, swap Button href+target for Link */}
-                                {/* <Button as={Link} to={step.ctaHref} variant="primary"> */}
-                                <Button
-                                  variant="primary"
-                                  href={step.ctaHref}
-                                  // target="_self"
-                                >
-                                  {step.ctaLabel ?? "Open"}
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                          {step.img && (
-                            <div style={{ width: 280, flex: "0 0 280px" }}>
-                              <Image
-                                src={step.img}
-                                alt={step.title}
-                                fluid
-                                rounded
-                                style={{ border: "1px solid #eee" }}
-                              />
-                              <div className="small text-muted mt-1">
-                                Placeholder screenshot
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </Card.Body>
-                    </Card>
-                  ))}
-                </Accordion.Body>
-              </Accordion.Item>
-            ))}
-          </Accordion>
+                </div>
+              ))}
+
+              {/* divider between sections */}
+              <hr className="mt-4" />
+            </section>
+          ))}
         </Col>
       </Row>
     </Container>

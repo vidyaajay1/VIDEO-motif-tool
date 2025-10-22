@@ -19,7 +19,6 @@ function AppShell() {
 
   return (
     <div className="d-flex" style={{ minHeight: "100vh" }}>
-      {/* Sidebar */}
       <div
         style={{
           width: collapsed ? 64 : 240,
@@ -29,8 +28,11 @@ function AppShell() {
         <CollapsibleSidebar collapsed={collapsed} onToggle={setCollapsed} />
       </div>
 
-      {/* Main content area */}
-      <div className="flex-grow-1 bg-light">
+      {/* ✅ Make this scrollable */}
+      <div
+        className="flex-grow-1 bg-light"
+        style={{ height: "100vh", overflowY: "auto" }}
+      >
         <div className="container-fluid py-3">
           <Outlet />
         </div>
