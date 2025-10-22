@@ -1,6 +1,6 @@
 import React, { CSSProperties } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
-import { FaBars, FaEye, FaSearch } from "react-icons/fa";
+import { FaBars, FaEye, FaSearch, FaBookOpen } from "react-icons/fa"; // ✅ added FaBookOpen
 import { Nav } from "react-bootstrap";
 import { Link } from "react-router-dom";
 
@@ -58,6 +58,7 @@ export default function CollapsibleSidebar({
           <FaEye className="me-2 ms-3" />
           {isOpen && "Motif Viewer"}
         </Nav.Link>
+
         <Nav.Link
           as={Link}
           to="/tf-finder"
@@ -67,6 +68,18 @@ export default function CollapsibleSidebar({
         >
           <FaSearch className="me-2 ms-3" />
           {isOpen && "TF Finder"}
+        </Nav.Link>
+
+        {/* ✅ New Tutorial link */}
+        <Nav.Link
+          as={Link}
+          to="/tutorial"
+          className="text-white"
+          style={linkStyle}
+          title="Tutorial"
+        >
+          <FaBookOpen className="me-2 ms-3" />
+          {isOpen && "Tutorial"}
         </Nav.Link>
       </Nav>
     </div>
