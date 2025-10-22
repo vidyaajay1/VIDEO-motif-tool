@@ -1,7 +1,6 @@
 // pages/Tutorial.tsx
 import React, { useMemo } from "react";
 import {
-  Alert,
   Badge,
   Button,
   Col,
@@ -14,15 +13,16 @@ import {
 type Step = {
   title: string;
   text: React.ReactNode;
-  img?: string; // e.g., "/tutorial/fig-2a_sidebar.png"
-  ctaHref?: string; // route to open the relevant page
+  img?: string; // single image (backward compatibility)
+  imgs?: string[]; // NEW: multiple images
+  ctaHref?: string;
   ctaLabel?: string;
 };
 
 type Section = {
-  id: string; // anchor id for TOC
+  id: string;
   title: string;
-  figureHint?: string; // e.g., "Fig 2A–2D"
+  figureHint?: string;
   steps: Step[];
 };
 
@@ -52,8 +52,8 @@ const Tutorial: React.FC = () => {
       },
       {
         id: "tf-finder",
-        title: "Step 1 — Using TF Finder to Acquire Gene & Motif Data",
-        figureHint: "Fig 2B–2D",
+        title: "Using TF Finder to Acquire Gene & Motif Data",
+        figureHint: "Fig 2B-2D",
         steps: [
           {
             title: "Identify Gene Sets of Interest",
@@ -71,20 +71,21 @@ const Tutorial: React.FC = () => {
             title: "Filter the List for Transcription Factors",
             text: (
               <>
-                Use the <strong>Filter for TFs (FlyBase)</strong> helper to
-                extract TFs present in your list. VIDEO shows known motifs (if
-                available) with JASPAR ID, PWM, and logo.
+                Use the <strong>Filter for TFs</strong> helper to extract TFs
+                present in your list, or choose the selected DE genes list.
+                VIDEO shows known motifs (if available) with JASPAR ID, PWM, and
+                logo.
               </>
             ),
             img: "/tutorial/fig-2c_tf_filter.png",
           },
           {
-            title: "Discover Motifs (If None Reported)",
+            title: "Discover Motifs Enriched in Gene Lists",
             text: (
               <>
                 Run <strong>Motif Discovery for Genes</strong> (STREME). Select
                 your gene list, optionally set promoter window and motif width
-                (defaults to 6–10&nbsp;bp), then click <em>Run STREME</em>. Keep
+                (defaults to 6-10&nbsp;bp), then click <em>Run STREME</em>. Keep
                 selected motifs in PWM (MEME) format to paste directly into
                 Motif Viewer later.
               </>
@@ -95,21 +96,26 @@ const Tutorial: React.FC = () => {
       },
       {
         id: "motif-viewer-setup",
-        title: "Step 2 — Using Motif Viewer to Create Motif Hit Plots",
-        figureHint: "Fig 3A–3D",
+        title: "Using Motif Viewer to Create Motif Hit Plots",
+        figureHint: "Fig 3A-3D",
         steps: [
           {
             title: "Set Up Genomic Input",
             text: (
               <>
-                Upload a <strong>gene list</strong> (regular mode) or{" "}
+                For regular mode: Upload a <strong>gene list</strong> or type in
+                your gene symbols, or upload a BED file with chromosomal
+                coordinates. For Compare mode: Upload{" "}
                 <strong>two gene lists</strong> (compare mode). Choose promoter
                 window size around the TSS (default ±500&nbsp;bp). Click{" "}
                 <em>Process Genomic Input</em> to validate and fetch
                 annotations/sequences.
               </>
             ),
-            img: "/tutorial/fig-3a_genomic_input.png",
+            imgs: [
+              "/tutorial/fig-3a_genomic_input.png",
+              "/tutorial/fig-3a_compareMode.png",
+            ],
           },
           {
             title: "Provide Motif Input",
@@ -117,11 +123,16 @@ const Tutorial: React.FC = () => {
               <>
                 Add motifs as <strong>IUPAC</strong> or matrices{" "}
                 <strong>(PWM/PFM/PCM)</strong> by pasting or uploading a .txt.
-                Give each motif a name and color, then click{" "}
-                <em>Process Motifs</em>.
+                If you're pasting a matrix, make sure to click{" "}
+                <em>Parse Pasted Matrix</em> once you paste each matrix. Give
+                each motif a name and color, then click <em>Process Motifs</em>{" "}
+                once all your motifs are entered.
               </>
             ),
-            img: "/tutorial/fig-3b_motif_input.png",
+            imgs: [
+              "/tutorial/fig-3b_motif_input.png",
+              "/tutorial/fig-3c_motif_input_example.png",
+            ],
           },
           {
             title: "Scan for Motif Occurrences",
@@ -322,19 +333,34 @@ const Tutorial: React.FC = () => {
                         </Button>
                       </div>
                     )}
-                    {step.img && (
-                      <figure style={{ maxWidth: 640 }}>
-                        <Image
-                          src={step.img}
-                          alt={step.title}
-                          fluid
-                          rounded
-                          style={{ border: "1px solid #eee" }}
-                        />
-                        <figcaption className="small text-muted mt-1">
-                          Placeholder screenshot
-                        </figcaption>
-                      </figure>
+
+                    {/* Support multiple images or a single image */}
+                    {step.imgs && step.imgs.length > 0 ? (
+                      <div className="d-flex flex-wrap justify-content-start gap-3 w-100">
+                        {step.imgs.map((src, idx) => (
+                          <figure key={idx} style={{ maxWidth: 640 }}>
+                            <Image
+                              src={src}
+                              alt={`${step.title} ${idx + 1}`}
+                              fluid
+                              rounded
+                              style={{ border: "1px solid #eee" }}
+                            />
+                          </figure>
+                        ))}
+                      </div>
+                    ) : (
+                      step.img && (
+                        <figure style={{ maxWidth: 640 }}>
+                          <Image
+                            src={step.img}
+                            alt={step.title}
+                            fluid
+                            rounded
+                            style={{ border: "1px solid #eee" }}
+                          />
+                        </figure>
+                      )
                     )}
                   </div>
                 </div>
