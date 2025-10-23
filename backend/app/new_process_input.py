@@ -42,20 +42,58 @@ def read_gtf_all_tss(gtf_fp):
         gtf_fp, sep="\t", comment="#", header=None,
         names=["Chromosome","Source","Feature","Start","End","Score","Strand","Frame","Attr"]
     )
-    # pull gene_symbol + transcript_id
-    gtf["Gene Symbol"]   = gtf.Attr.str.extract(r'gene_symbol "([^"]+)"')
-    gtf["Flybase ID"]   = gtf.Attr.str.extract(r'gene_id "([^"]+)"')
-    gtf["Transcript ID"] = gtf.Attr.str.extract(r'transcript_id "([^"]+)"')
 
-    # one row per isoform
-    m = gtf.Feature == "mRNA"
-    txs = gtf.loc[m, ["Chromosome","Start","End","Strand","Gene Symbol","Flybase ID", "Transcript ID"]].copy()
-    txs["TSS"] = txs.apply(lambda r: r.Start if r.Strand=="+" else r.End, axis=1)
+    # Extract identifiers/biotypes if present
+    gtf["Gene Symbol"]    = gtf.Attr.str.extract(r'gene_symbol "([^"]+)"')
+    gtf["Flybase ID"]     = gtf.Attr.str.extract(r'gene_id "([^"]+)"')
+    gtf["Transcript ID"]  = gtf.Attr.str.extract(r'transcript_id "([^"]+)"')
+    gtf["transcript_type"] = gtf.Attr.str.extract(r'transcript_type "([^"]+)"')  # may be NaN
 
-    # drop any transcripts that have the same TSS for the same gene
-    txs_unique = txs.drop_duplicates(subset=["Gene Symbol", "TSS"])
+    # Keep one line per transcript feature (mRNA / lncRNA / ncRNA / transcript / etc.)
+    transcript_like = gtf.Feature.str.contains(
+        r'(?:mRNA|ncRNA|lncRNA|lnc_RNA|miRNA|snRNA|snoRNA|rRNA|tRNA|piRNA|transcript)$',
+        case=False, na=False
+    )
+    txs = gtf.loc[transcript_like, [
+        "Chromosome","Start","End","Strand","Gene Symbol","Flybase ID","Transcript ID","transcript_type"
+    ]].copy()
 
-    return txs_unique
+    # Fallback: if a gene has no transcript rows at all, use the 'gene' feature as a pseudo-isoform
+    if txs.empty:
+        gene_rows = gtf[gtf.Feature == "gene"][[
+            "Chromosome","Start","End","Strand","Gene Symbol","Flybase ID"
+        ]].copy()
+        gene_rows["Transcript ID"] = gene_rows["Flybase ID"] + "_gene"
+        gene_rows["transcript_type"] = "gene"
+        txs = gene_rows
+
+    # Compute TSS
+    txs["TSS"] = np.where(txs["Strand"] == "+", txs["Start"], txs["End"])
+
+    # --- DEDUP PASS 1: one row per isoform (Transcript ID) ---
+    # If a transcript appears multiple times for any reason, prefer one deterministically.
+    # Priority: has transcript_type (not NaN) first, then smallest Start as tie-breaker.
+    txs = txs.sort_values(
+        by=["Transcript ID", "transcript_type", "Start"],
+        ascending=[True, True, True],
+        na_position="last"
+    ).drop_duplicates(subset=["Transcript ID"], keep="first")
+
+    # --- DEDUP PASS 2: collapse isoforms with identical TSS within a gene ---
+    # Keep one representative per (FBgn, TSS). Sort to prefer named symbols and defined transcript_type.
+    txs = txs.sort_values(
+        by=["Flybase ID", "TSS", "transcript_type", "Transcript ID"],
+        ascending=[True, True, True, True],
+        na_position="last"
+    ).drop_duplicates(subset=["Flybase ID", "TSS"], keep="first")
+
+    # Final columns
+    txs = txs[[
+        "Chromosome","Start","End","Strand","Gene Symbol","Flybase ID","Transcript ID","TSS"
+    ]].reset_index(drop=True)
+
+    return txs
+
 
 # subset to genes of interest and promoter windows
 def get_peaks_df_for_transcripts(

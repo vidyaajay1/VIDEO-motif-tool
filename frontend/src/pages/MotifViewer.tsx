@@ -606,6 +606,9 @@ function MotifViewer() {
                     id="genomic-input-info"
                   />
                 </h4>
+                <div className="small text-muted mt-2">
+                  {"Current supported version of reference genome: dmel6.59"}
+                </div>
 
                 {/* Compare block now bound to context */}
                 <CompareInputs
