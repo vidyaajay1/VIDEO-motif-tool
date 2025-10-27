@@ -109,7 +109,10 @@ const Tutorial: React.FC = () => {
                 <strong>two gene lists</strong> (compare mode). Choose promoter
                 window size around the TSS (default ±500&nbsp;bp). Click{" "}
                 <em>Process Genomic Input</em> to validate and fetch
-                annotations/sequences.
+                annotations/sequences. If you see a warning with Unmatched Genes
+                it is because of mismatch with the FlyBase annotations. Please
+                consider using the most updated version of the gene name from
+                FlyBase.
               </>
             ),
             imgs: [
@@ -272,8 +275,8 @@ const Tutorial: React.FC = () => {
                 You can now (1) build motif plots from DE gene sets, (2) compare
                 conditions, (3) refine with ATAC/ChIP filters, and (4) overlay
                 BigWig signals. Continue exploring with your own data or curated
-                sets. For any further help/questions about VIDEO please contact
-                vajay1@jh.edu and we will get back to you!
+                sets. For any further help/questions about VIDEO or bugs to be
+                fixed, please contact vajay1@jh.edu and we will get back to you!
               </>
             ),
           },
