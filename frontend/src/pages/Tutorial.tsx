@@ -46,7 +46,7 @@ const Tutorial: React.FC = () => {
                 gene lists and discover TFs/motifs of interest.
               </>
             ),
-            img: "/tutorial/fig-2a_sidebar.png",
+            img: "/images/tutorial/fig-2a_sidebar.png",
           },
         ],
       },
@@ -65,7 +65,7 @@ const Tutorial: React.FC = () => {
                 (recommended if you have p-values or log fold changes).
               </>
             ),
-            img: "/tutorial/fig-2b_stage_tissue.png",
+            img: "/images/tutorial/fig-2b_stage_tissue.png",
           },
           {
             title: "Filter the List for Transcription Factors",
@@ -77,7 +77,7 @@ const Tutorial: React.FC = () => {
                 logo.
               </>
             ),
-            img: "/tutorial/fig-2c_tf_filter.png",
+            img: "/images/tutorial/fig-2c_tf_filter.png",
           },
           {
             title: "Discover Motifs Enriched in Gene Lists",
@@ -90,7 +90,7 @@ const Tutorial: React.FC = () => {
                 Motif Viewer later.
               </>
             ),
-            img: "/tutorial/fig-2d_streme.png",
+            img: "/images/tutorial/fig-2d_streme.png",
           },
         ],
       },
@@ -116,8 +116,8 @@ const Tutorial: React.FC = () => {
               </>
             ),
             imgs: [
-              "/tutorial/fig-3a_genomic_input.png",
-              "/tutorial/fig-3a_compareMode.png",
+              "/images/tutorial/fig-3a_genomic_input.png",
+              "/images/tutorial/fig-3a_compareMode.png",
             ],
           },
           {
@@ -133,8 +133,8 @@ const Tutorial: React.FC = () => {
               </>
             ),
             imgs: [
-              "/tutorial/fig-3b_motif_input.png",
-              "/tutorial/fig-3c_motif_input_example.png",
+              "/images/tutorial/fig-3b_motif_input.png",
+              "/images/tutorial/fig-3c_motif_input_example.png",
             ],
           },
           {
@@ -146,7 +146,7 @@ const Tutorial: React.FC = () => {
                 promoters.
               </>
             ),
-            img: "/tutorial/fig-3c_fimo.png",
+            img: "/images/tutorial/fig-3c_fimo.png",
           },
           {
             title: "Integrate ATAC-seq and ChIP-seq Peaks (Optional)",
@@ -158,7 +158,7 @@ const Tutorial: React.FC = () => {
                 “open chromatin only” and “ChIP peak only.”
               </>
             ),
-            img: "/tutorial/fig-3d_atac_chip.png",
+            img: "/images/tutorial/fig-3d_atac_chip.png",
           },
         ],
       },
@@ -179,7 +179,7 @@ const Tutorial: React.FC = () => {
                 the settings and update the plot.
               </>
             ),
-            img: "/tutorial/fig-4_settings1.png",
+            img: "/images/tutorial/fig-4_settings1.png",
           },
           {
             title: "View Motif Hits Separately",
@@ -191,8 +191,8 @@ const Tutorial: React.FC = () => {
               </>
             ),
             imgs: [
-              "/tutorial/fig-4_settings2.png",
-              "/tutorial/fig-4_settings3.png",
+              "/images/tutorial/fig-4_settings2.png",
+              "/images/tutorial/fig-4_settings3.png",
             ],
           },
           {
@@ -205,7 +205,7 @@ const Tutorial: React.FC = () => {
                 significant matches remain.
               </>
             ),
-            img: "/tutorial/fig-4_settingsMotif.png",
+            img: "/images/tutorial/fig-4_settingsMotif.png",
           },
           {
             title: "Update & Download",
@@ -236,7 +236,7 @@ const Tutorial: React.FC = () => {
                 left to zoom, reset, and download the figure.
               </>
             ),
-            img: "/tutorial/fig-4_plot_hover.png",
+            img: "/images/tutorial/fig-4_plot_hover.png",
           },
         ],
       },
@@ -258,8 +258,8 @@ const Tutorial: React.FC = () => {
               </>
             ),
             imgs: [
-              "/tutorial/fig-s2_overlay1.png",
-              "/tutorial/fig-s2_overlay2.png",
+              "/images/tutorial/fig-s2_overlay1.png",
+              "/images/tutorial/fig-s2_overlay2.png",
             ],
           },
         ],
