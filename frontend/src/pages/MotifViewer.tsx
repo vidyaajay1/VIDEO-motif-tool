@@ -1,7 +1,15 @@
 // MotifViewer.tsx
 import React, { useState, useEffect } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
-import { Container, Card, Nav, Spinner, Button, Alert } from "react-bootstrap";
+import {
+  Container,
+  Card,
+  Nav,
+  Spinner,
+  Button,
+  Alert,
+  Form,
+} from "react-bootstrap";
 
 import GenomicInput from "../components/GenomicInput";
 import GetMotifInput from "../components/GetMotifInput";
@@ -14,6 +22,7 @@ import BigWigOverlayCompare from "../components/BigWigOverlayCompare";
 import InfoTip from "../components/InfoTip";
 
 import { useMotifViewer } from "../context/MotifViewerContext";
+import { parseMemeMotifs } from "../utils/parseMemeMotifs";
 
 import CompareInputs from "../components/CompareInputs";
 import MotifOccurrenceCompare from "../components/MotifOccurrenceCompare";
@@ -97,7 +106,7 @@ async function sleep(ms: number) {
 
 async function waitForJob(
   jobId: string,
-  opts?: { interval?: number; timeoutMs?: number }
+  opts?: { interval?: number; timeoutMs?: number },
 ) {
   const interval = opts?.interval ?? 1000;
   const timeoutMs = opts?.timeoutMs ?? 15 * 60 * 1000; // 15 min
@@ -106,7 +115,7 @@ async function waitForJob(
 
   while (true) {
     const { status, error } = await getJSON(
-      ENDPOINTS.jobStatus(API_BASE, jobId)
+      ENDPOINTS.jobStatus(API_BASE, jobId),
     );
 
     if (status === "finished") return;
@@ -191,7 +200,7 @@ function MotifViewer() {
 
   // Figures
   const [overviewFigureJson, setOverviewFigureJson] = useState<string | null>(
-    null
+    null,
   );
   const [filteredOverviewFigureJson, setFilteredOverviewFigureJson] = useState<
     string | null
@@ -241,6 +250,33 @@ function MotifViewer() {
   }, [scanVersion]);
 
   // Motif CRUD
+  const handleStremeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const parsed = parseMemeMotifs(text, 10);
+      if (parsed.length === 0) return;
+
+      const newMotifs = parsed.map((p) => ({
+        type: "pwm" as const,
+        iupac: "",
+        pwm: p.matrix,
+        pcm: [] as number[][],
+        name: p.name,
+        color: "#d2a32bff",
+      }));
+
+      setMotifs((ms) => {
+        const remaining = 10 - ms.length;
+        return [...ms, ...newMotifs.slice(0, remaining)];
+      });
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be re-uploaded if needed
+    e.target.value = "";
+  };
   const updateMotif = (i: number, p: Partial<(typeof motifs)[0]>) =>
     setMotifs((ms) => ms.map((m, idx) => (idx === i ? { ...m, ...p } : m)));
 
@@ -258,7 +294,7 @@ function MotifViewer() {
               color: "#d2a32bff",
             },
           ]
-        : ms
+        : ms,
     );
 
   const removeMotif = (i: number) =>
@@ -416,7 +452,7 @@ function MotifViewer() {
   // Build filters → FormData (reused)
   function buildFormDataFromFilters(
     filters: FilterSettings,
-    inCompare: boolean
+    inCompare: boolean,
   ): FormData {
     const fd = new FormData();
     fd.append("window", String(inputWindow));
@@ -428,7 +464,7 @@ function MotifViewer() {
     fd.append("best_transcript", String(!!filters.bestTranscript));
     fd.append(
       "per_motif_pvals_json",
-      JSON.stringify(filters.perMotifPvals || {})
+      JSON.stringify(filters.perMotifPvals || {}),
     );
     if (inCompare) {
       if (!sessionId) throw new Error("Missing session_id");
@@ -465,7 +501,7 @@ function MotifViewer() {
         setOrderedPeaksByLabel(normalizeOrderedPeaks(json.ordered_peaks || {}));
       } else {
         setFilteredOverviewFigureJson(
-          json.overview_plot ? JSON.stringify(json.overview_plot) : null
+          json.overview_plot ? JSON.stringify(json.overview_plot) : null,
         );
       }
     } catch (e: any) {
@@ -643,13 +679,13 @@ function MotifViewer() {
                     isCompare
                       ? Boolean(
                           geneListFileA &&
-                            geneListFileB &&
-                            labelA.trim() &&
-                            labelB.trim()
+                          geneListFileB &&
+                          labelA.trim() &&
+                          labelB.trim(),
                         )
                       : dataType === "bed"
-                      ? Boolean(bedFile)
-                      : Boolean(geneListFile)
+                        ? Boolean(bedFile)
+                        : Boolean(geneListFile)
                   }
                 />
               </>
@@ -667,7 +703,29 @@ Enter a name and choose a color for each motif.`}
                     id="motif-input-info"
                   />
                 </h4>
-
+                {/* STREME / MEME bulk import */}
+                <div className="d-flex align-items-center justify-content-center gap-2 mb-3">
+                  <Form.Label
+                    htmlFor="streme-upload"
+                    className="mb-0 text-muted"
+                    style={{ fontSize: "0.875rem" }}
+                  >
+                    Import from STREME / MEME file:
+                  </Form.Label>
+                  <Form.Control
+                    id="streme-upload"
+                    type="file"
+                    accept=".txt,.meme"
+                    size="sm"
+                    style={{ maxWidth: "260px" }}
+                    onChange={handleStremeUpload}
+                  />
+                  {motifs.length >= 10 && (
+                    <small className="text-warning">
+                      Maximum of 10 motifs reached.
+                    </small>
+                  )}
+                </div>
                 {motifs.length === 0 && (
                   <div className="alert alert-warning">
                     Please add at least one motif to proceed!

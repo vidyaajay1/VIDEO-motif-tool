@@ -16,14 +16,48 @@ const FilterTFs: React.FC = () => {
   const { tissue, stage } = state;
 
   const [inputSource, setInputSource] = useState<"de_genes" | "uploaded">(
-    "de_genes"
+    "de_genes",
   );
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isFiltering, setIsFiltering] = useState(false);
   const [tfResults, setTfResults] = useState<TFResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const handleDownloadMotifs = () => {
+    const motifsWithPfm = tfResults.filter((tf) => tf.pfm !== null);
+    if (motifsWithPfm.length === 0) return;
 
+    const header = [
+      "MEME version 5",
+      "",
+      "ALPHABET= ACGT",
+      "",
+      "Background letter frequencies",
+      "A 0.291 C 0.209 G 0.209 T 0.291",
+      "",
+    ].join("\n");
+
+    const blocks = motifsWithPfm.map((tf) => {
+      const rows = tf
+        .pfm!.map((row) => " " + row.map((v) => v.toFixed(6)).join(" "))
+        .join("\n");
+      return (
+        `MOTIF ${tf.motif_id ?? tf.symbol} ${tf.symbol}\n` +
+        `letter-probability matrix: alength= 4 w= ${tf.pfm!.length}\n` +
+        rows
+      );
+    });
+
+    const content = header + blocks.join("\n\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "Filtered_TF_Motifs.txt");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   const handleFilter = async () => {
     setIsFiltering(true);
     setTfResults([]);
@@ -33,7 +67,7 @@ const FilterTFs: React.FC = () => {
       const formData = new FormData();
       formData.append(
         "use_de_genes",
-        inputSource === "de_genes" ? "true" : "false"
+        inputSource === "de_genes" ? "true" : "false",
       );
 
       if (inputSource === "de_genes") {
@@ -172,7 +206,7 @@ const FilterTFs: React.FC = () => {
                                 <pre className="mb-0 mt-2">
                                   {tf.pfm
                                     .map((row) =>
-                                      row.map((v) => v.toFixed(6)).join("\t")
+                                      row.map((v) => v.toFixed(6)).join("\t"),
                                     )
                                     .join("\n")}
                                 </pre>
@@ -218,7 +252,7 @@ const FilterTFs: React.FC = () => {
                   tfResults
                     .map(
                       (tf) =>
-                        `${tf.symbol},${tf.flybase_id},${tf.motif_id ?? ""}`
+                        `${tf.symbol},${tf.flybase_id},${tf.motif_id ?? ""}`,
                     )
                     .join("\n");
                 const blob = new Blob([csvContent], {
@@ -234,6 +268,13 @@ const FilterTFs: React.FC = () => {
               }}
             >
               Download TF List (CSV)
+            </Button>
+            <Button
+              variant="outline-secondary"
+              onClick={handleDownloadMotifs}
+              disabled={tfResults.filter((tf) => tf.pfm !== null).length === 0}
+            >
+              Download Motifs (.txt)
             </Button>
           </div>
         </div>

@@ -10,6 +10,7 @@ import {
   Spinner,
 } from "react-bootstrap";
 import { FaTrash } from "react-icons/fa";
+import { parseMemeMotifs } from "../utils/parseMemeMotifs";
 
 export type UserMotif = {
   type: "iupac" | "pwm" | "pcm";
@@ -66,7 +67,7 @@ export default function GetMotifInput({
   const handleCellChange = (rowIdx: number, colIdx: number, value: number) => {
     const rows = motif.type === "pwm" ? motif.pwm : motif.pcm;
     const updated = rows.map((r, i) =>
-      i === rowIdx ? r.map((v, j) => (j === colIdx ? value : v)) : r
+      i === rowIdx ? r.map((v, j) => (j === colIdx ? value : v)) : r,
     );
     onChange({ [motif.type]: updated } as any);
   };
@@ -82,7 +83,7 @@ export default function GetMotifInput({
       line
         .trim()
         .split(/\s+/)
-        .map((token) => parseFloat(token))
+        .map((token) => parseFloat(token)),
     );
 
     onChange({ pwm: [], pcm: [], [motif.type]: matrix } as any);
@@ -92,15 +93,32 @@ export default function GetMotifInput({
     parseMatrixText(matrixPaste);
     setShowMatrixEditor(false);
   };
-
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      parseMatrixText(text);
-      setShowMatrixEditor(false);
+
+      // If it looks like a MEME-format file, use the structured parser
+      if (text.includes("letter-probability matrix:")) {
+        const parsed = parseMemeMotifs(text, 1);
+        if (parsed.length > 0) {
+          const { name, matrix } = parsed[0];
+          onChange({
+            pwm: [],
+            pcm: [],
+            [motif.type]: matrix,
+            // Only pre-fill name if the user hasn't already set one
+            ...(motif.name === "" ? { name } : {}),
+          } as any);
+          setShowMatrixEditor(false);
+        }
+      } else {
+        // Plain matrix text — existing behaviour
+        parseMatrixText(text);
+        setShowMatrixEditor(false);
+      }
     };
     reader.readAsText(file);
   };
@@ -178,7 +196,7 @@ export default function GetMotifInput({
                           handleCellChange(
                             rIdx,
                             cIdx,
-                            parseFloat(e.target.value) || 0
+                            parseFloat(e.target.value) || 0,
                           )
                         }
                       />
