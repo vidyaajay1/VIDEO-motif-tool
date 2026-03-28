@@ -1,4 +1,3 @@
-from turtle import st
 import os, json, io, pickle, zipfile, uuid
 import pandas as pd
 from rq import get_current_job
