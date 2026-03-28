@@ -14,7 +14,7 @@ EXPECTED_COLS = [
     "Rel_pos", "Score_bits", "Strand", "logFC", "Sequence", "p_value"
 ]
 
-def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
+def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str,  overlap: float = 0.5) -> pd.DataFrame:
     """
     Filters motif hits to retain only those overlapping regions in a BED file.
 
@@ -44,7 +44,7 @@ def filter_motif_hits(hits_df: pd.DataFrame, bed_fp: str) -> pd.DataFrame:
     print(f"[debug] motif hits loaded: {motif_bed.count()}")
     print(f"[debug] BED filter regions loaded: {filter_bed.count()}")
 
-    intersected = motif_bed.intersect(filter_bed, u=True, f=0.5)
+    intersected = motif_bed.intersect(filter_bed, u=True, f=overlap)
     print(f"[debug] overlaps found: {intersected.count()}")
     print("hits_df:\n", hits_df.head())
     # Extract filtered intervals

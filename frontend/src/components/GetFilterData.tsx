@@ -29,7 +29,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
   const [showDownload, setShowDownload] = useState<boolean>(false);
   const [filterComplete, setFilterComplete] = useState(false);
   const { singleTopHitsReady, setSingleTopHitsReady } = useMotifViewer();
-
+  const [overlap, setOverlap] = useState<number>(0.5);
   // ← Reset filtered state whenever the underlying data changes
   // whenever we get a brand new scanVersion (or dataId/scanComplete changes),
   // clear out the “Filtered!” state so the button goes back to primary
@@ -65,6 +65,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
       if (chipBedFile) {
         form1.append("chip_bed", chipBedFile);
       }
+      form1.append("overlap", overlap.toString());
 
       const res1 = await fetch(`${API_BASE}/filter-motif-hits`, {
         method: "POST",
@@ -133,6 +134,32 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
               disabled={!scanComplete}
             />
           </div>
+        </div>
+      </div>
+      <div className="row align-items-center mt-3">
+        <div className="col">
+          <label htmlFor="overlap-slider" className="form-label">
+            Minimum overlap fraction for BED intersect:
+            <InfoTip
+              text="Fraction of a motif hit that must overlap a BED region to be retained. Default is 0.5 (50%). Higher values are more stringent."
+              placement="right"
+              id="overlap-info"
+            />
+          </label>
+        </div>
+        <div className="col-auto d-flex align-items-center gap-2">
+          <input
+            id="overlap-slider"
+            type="range"
+            min={0.1}
+            max={1.0}
+            step={0.05}
+            value={overlap}
+            onChange={(e) => setOverlap(parseFloat(e.target.value))}
+            disabled={!scanComplete}
+            style={{ width: "160px" }}
+          />
+          <span style={{ minWidth: "3rem" }}>{overlap.toFixed(2)}</span>
         </div>
       </div>
       <button

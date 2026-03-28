@@ -1,3 +1,4 @@
+from turtle import st
 import os, json, io, pickle, zipfile, uuid
 import pandas as pd
 from rq import get_current_job
@@ -122,7 +123,7 @@ def scan_session_batch(session_id: str, dataset_ids: list[str], window: int, fim
 # --------------------------
 # 1) FILTER + SCORE (single)
 # --------------------------
-def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool) -> dict:
+def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool, overlap: float = 0.5) -> dict:
     _progress(1)
     df_hits_fp = os.path.join(TMP_DIR, f"{data_id}_df_hits.pkl")
     _ensure(df_hits_fp)
@@ -137,7 +138,7 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool) -> 
 
     # ATAC
     if have_atac and os.path.exists(atac_path):
-        atac_filt = filter_motif_hits(df_hits, atac_path)
+        atac_filt = filter_motif_hits(df_hits, atac_path, overlap=overlap)
     else:
         atac_filt = empty_hits
     with open(os.path.join(TMP_DIR, f"{data_id}_atac_filt_hits.pkl"), "wb") as f:
@@ -145,7 +146,7 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool) -> 
 
     # ChIP
     if have_chip and os.path.exists(chip_path):
-        chip_filt = filter_motif_hits(df_hits, chip_path)
+        chip_filt = filter_motif_hits(df_hits, chip_path, overlap=overlap)
     else:
         chip_filt = empty_hits
     with open(os.path.join(TMP_DIR, f"{data_id}_chip_filt_hits.pkl"), "wb") as f:
@@ -166,7 +167,7 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool) -> 
 # ------------------------------
 # 2) FILTER + SCORE (compare/batch)
 # ------------------------------
-def filter_score_batch_task(session_id: str, mode: str) -> dict:
+def filter_score_batch_task(session_id: str, mode: str, overlap: float = 0.5) -> dict:
     """
     mode:
       - 'shared' : use shared *_atac_shared.bed / *_chip_shared.bed for all datasets
@@ -205,7 +206,7 @@ def filter_score_batch_task(session_id: str, mode: str) -> dict:
 
         # ATAC
         if atac_path:
-            atac_filt = filter_motif_hits(df_hits, atac_path)
+            atac_filt = filter_motif_hits(df_hits, atac_path, overlap=overlap)
         else:
             atac_filt = empty_hits
         with open(os.path.join(TMP_DIR, f"{data_id}_atac_filt_hits.pkl"), "wb") as f:
@@ -213,7 +214,7 @@ def filter_score_batch_task(session_id: str, mode: str) -> dict:
 
         # ChIP
         if chip_path:
-            chip_filt = filter_motif_hits(df_hits, chip_path)
+            chip_filt = filter_motif_hits(df_hits, chip_path, overlap=overlap)
         else:
             chip_filt = empty_hits
         with open(os.path.join(TMP_DIR, f"{data_id}_chip_filt_hits.pkl"), "wb") as f:

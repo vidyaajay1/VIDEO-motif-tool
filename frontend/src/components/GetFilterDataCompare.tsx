@@ -37,6 +37,7 @@ const GetFilterDataCompare: React.FC<Props> = ({
   const [chipA, setChipA] = useState<File | null>(null);
   const [atacB, setAtacB] = useState<File | null>(null);
   const [chipB, setChipB] = useState<File | null>(null);
+  const [overlap, setOverlap] = useState<number>(0.5);
 
   // When scanVersion truly changes (a new scan), clear *only* this session’s results
   useEffect(() => {
@@ -97,7 +98,7 @@ const GetFilterDataCompare: React.FC<Props> = ({
         if (atacB) fd.append("atac_bed_b", atacB);
         if (chipB) fd.append("chip_bed_b", chipB);
       }
-
+      fd.append("overlap", overlap.toString());
       const res = await fetch(`${API_BASE}/filter-motif-hits-batch`, {
         method: "POST",
         body: fd,
@@ -125,6 +126,7 @@ const GetFilterDataCompare: React.FC<Props> = ({
     chipA,
     atacB,
     chipB,
+    overlap,
     onDone,
     onError,
     setCompareSessionResults,
@@ -239,7 +241,29 @@ const GetFilterDataCompare: React.FC<Props> = ({
           </div>
         </div>
       )}
-
+      <div className="container mt-3" style={{ maxWidth: 850 }}>
+        <div className="row align-items-center">
+          <div className="col">
+            <label htmlFor="overlap-slider-compare" className="form-label">
+              Minimum overlap fraction for BED intersect:
+            </label>
+          </div>
+          <div className="col-auto d-flex align-items-center gap-2">
+            <input
+              id="overlap-slider-compare"
+              type="range"
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              value={overlap}
+              onChange={(e) => setOverlap(parseFloat(e.target.value))}
+              disabled={!scanComplete}
+              style={{ width: "160px" }}
+            />
+            <span style={{ minWidth: "3rem" }}>{overlap.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
       <button
         type="button"
         className={`btn ${filterComplete ? "btn-success" : "btn-primary"} mt-3`}

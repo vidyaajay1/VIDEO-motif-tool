@@ -407,6 +407,7 @@ async def filter_and_score_enqueue(
     atac_bed: UploadFile = File(None),
     chip_bed: UploadFile = File(None),
     data_id: str = Form(...),
+    overlap: float = Form(0.5),  
 ):
     # Write uploads to TMP_DIR (web thread) — then worker reads from disk.
     have_atac = have_chip = False
@@ -424,7 +425,7 @@ async def filter_and_score_enqueue(
 
     job = q.enqueue(
         filter_score_single_task,
-        data_id, have_atac, have_chip,
+        data_id, have_atac, have_chip, overlap, 
         retry=Retry(max=3, interval=[10,30,60]),
         job_timeout="1800",
     )
@@ -439,6 +440,7 @@ async def filter_and_score_batch_enqueue(
     chip_bed_a: UploadFile = File(None),
     atac_bed_b: UploadFile = File(None),
     chip_bed_b: UploadFile = File(None),
+    overlap: float = Form(0.5),   
 ):
     datasets = _load_session(session_id)
     if not datasets:
@@ -476,7 +478,7 @@ async def filter_and_score_batch_enqueue(
 
     job = q.enqueue(
         filter_score_batch_task,
-        session_id, mode,
+        session_id, mode, overlap,
         retry=Retry(max=3, interval=[10,30,60]),
         job_timeout="3600",
     )
