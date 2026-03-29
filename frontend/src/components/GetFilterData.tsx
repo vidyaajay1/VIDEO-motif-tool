@@ -14,6 +14,7 @@ export interface GetFilterDataProps {
     hasATAC: boolean;
     hasChIP: boolean;
   }) => void;
+  waitForJob: (jobId: string) => Promise<void>; // <-- add this
 }
 
 const GetFilterData: React.FC<GetFilterDataProps> = ({
@@ -23,6 +24,7 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
   onFilteredOverview,
   onError,
   onDataAvailabilityChange,
+  waitForJob, // <-- add this
 }) => {
   const [atacBedFile, setAtacBedFile] = useState<File | null>(null);
   const [chipBedFile, setChipBedFile] = useState<File | null>(null);
@@ -75,7 +77,8 @@ const GetFilterData: React.FC<GetFilterDataProps> = ({
         const err = await res1.text();
         throw new Error(err);
       }
-
+      const { job_id } = await res1.json();
+      await waitForJob(job_id);
       // indicate success & show TSV download link
       setSingleTopHitsReady(true);
       setFilterComplete(true);

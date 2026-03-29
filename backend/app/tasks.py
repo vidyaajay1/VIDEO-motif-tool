@@ -152,6 +152,18 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool, ove
         pickle.dump(chip_filt, f)
 
     _progress(50)
+        # ── NEW: catch over-stringent overlap early ──────────────────────────────
+    if have_atac and atac_filt.empty:
+        raise ValueError(
+            "No motif hits overlapped the ATAC BED file at the requested overlap "
+            "fraction. Try lowering the minimum overlap threshold."
+        )
+    if have_chip and chip_filt.empty:
+        raise ValueError(
+            "No motif hits overlapped the ChIP BED file at the requested overlap "
+            "fraction. Try lowering the minimum overlap threshold."
+        )
+    # ─────────────────────────────────────────────────────────────────────────
     scored = score_and_merge(df_hits, chip_filt, atac_filt)
     ranked = score_hit_naive_bayes(scored)
     top_hits = (ranked.reset_index()
@@ -160,8 +172,8 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool, ove
     top_fp = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
     top_hits.to_csv(top_fp, sep="\t", index=False)
 
-    _progress(100)
-    return {"data_id": data_id, "ok": True}
+
+
 
 # ------------------------------
 # 2) FILTER + SCORE (compare/batch)
@@ -219,6 +231,18 @@ def filter_score_batch_task(session_id: str, mode: str, overlap: float = 0.5) ->
         with open(os.path.join(TMP_DIR, f"{data_id}_chip_filt_hits.pkl"), "wb") as f:
             pickle.dump(chip_filt, f)
 
+        # ── NEW: catch over-stringent overlap early ──────────────────────────────
+        if atac_path and atac_filt.empty:
+            raise ValueError(
+                "No motif hits overlapped the ATAC BED file at the requested overlap "
+                "fraction. Try lowering the minimum overlap threshold."
+            )
+        if chip_path and chip_filt.empty:
+            raise ValueError(
+                "No motif hits overlapped the ChIP BED file at the requested overlap "
+                "fraction. Try lowering the minimum overlap threshold."
+            )
+        # ─────────────────────────────────────────────────────────────────────────
         # Score + export top hits
         scored = score_and_merge(df_hits, chip_filt, atac_filt)
         ranked = score_hit_naive_bayes(scored)

@@ -834,6 +834,7 @@ Enter a name and choose a color for each motif.`}
                     setHasATAC(hasATAC);
                     setHasChIP(hasChIP);
                   }}
+                  waitForJob={waitForJob}
                 />
               ))}
 
@@ -847,7 +848,7 @@ Enter a name and choose a color for each motif.`}
                     <FiltersBar
                       motifList={validatedMotifNames}
                       fimoThreshold={fimoThreshold}
-                      allowOpenChromatin={hasATAC} // ✅ wire availability
+                      allowOpenChromatin={hasATAC} //  wire availability
                       allowBindingPeaks={hasChIP}
                       onApply={(f: FilterSettings) =>
                         fetchFilteredPlot({

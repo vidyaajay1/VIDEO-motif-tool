@@ -29,7 +29,7 @@ export default function MotifOccurencePlot({
 
   return (
     <section className="mb-5">
-      {/* 👇 Download button slot: right below Generate Plot */}
+      {/*  Download button slot: right below Generate Plot */}
       {parsed && children ? (
         <div className="d-flex gap-2 mt-2">{children}</div>
       ) : null}
