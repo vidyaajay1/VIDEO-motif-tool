@@ -253,7 +253,6 @@ def plot_occurrence_overview_plotly(
                 "p-value: %{customdata[9]:.2e}<br>"
                 "Strand: %{customdata[7]}"
                 + ("<br>Seq: %{customdata[8]}" if seq is not None else "")
-                + "<br><a href='%{customdata[10]}' target='_blank'>View in FlyBase JBrowse</a>"  # ← NEW
                 + "<extra></extra>"
             )
 
