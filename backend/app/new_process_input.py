@@ -10,10 +10,17 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
     bed_dict = {}
     with open(bed_filepath, "r") as bed:
         for line in bed:
-            chrom, start, end, _, _ = line.strip().split("\t")
-            start = int(start)
-            end = int(end)
-            peak_name = f"{chrom}:{start}"
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("track") or line.startswith("browser"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 3:
+                continue
+            chrom = fields[0]
+            start = int(fields[1])
+            end = int(fields[2])
+            # use name field if present, otherwise generate one
+            peak_name = fields[3] if len(fields) >= 4 else f"{chrom}:{start}-{end}"
             midpoint = (start + end) // 2
             bed_dict[peak_name] = {
                 "Chromosome": chrom,
@@ -24,13 +31,16 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
             }
     bed_df = pd.DataFrame.from_dict(bed_dict, orient="index").reset_index()
     bed_df = bed_df.rename(columns={"index": "Peak_ID"})
-    
+
+    if bed_df.empty:
+        return bed_df
+
     if bed_df["Chromosome"].iloc[0].startswith("chr"):
         bed_df["Chromosome_chr"] = bed_df["Chromosome"].copy()
         bed_df["Chromosome"] = bed_df["Chromosome"].str.replace("chr", "", regex=False)
     else:
-        bed_df["Chromosome_chr"] = "chr" + bed_df["Chromosome"] 
-    # Filter for valid Drosophila chromosomes
+        bed_df["Chromosome_chr"] = "chr" + bed_df["Chromosome"]
+
     valid_chromosomes = ["2L", "2R", "3L", "3R", "4", "X", "Y", "mitochondrion_genome"]
     bed_df = bed_df[bed_df["Chromosome"].isin(valid_chromosomes)].reset_index(drop=True)
     return bed_df
