@@ -202,6 +202,7 @@ function MotifViewer() {
   const [overviewFigureJson, setOverviewFigureJson] = useState<string | null>(
     null,
   );
+  const [filteredHits, setFilteredHits] = useState<any[]>([]);
   const [filteredOverviewFigureJson, setFilteredOverviewFigureJson] = useState<
     string | null
   >(null);
@@ -503,6 +504,7 @@ function MotifViewer() {
         setFilteredOverviewFigureJson(
           json.overview_plot ? JSON.stringify(json.overview_plot) : null,
         );
+        setFilteredHits(json.final_hits ?? []);
       }
     } catch (e: any) {
       alert(e.message || String(e));
@@ -510,6 +512,31 @@ function MotifViewer() {
   };
 
   // Downloads (single/compare unified)
+  const downloadBED = () => {
+    if (!filteredHits.length) return;
+
+    const lines = filteredHits.map((h: any) =>
+      [
+        h.Chromosome,
+        h.Hit_start,
+        h.Hit_end,
+        h.Motif,
+        h.Score_bits,
+        h.Strand,
+      ].join("\t"),
+    );
+
+    const content =
+      'track name="VIDEO_motif_hits" useScore=1\n' + lines.join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "VIDEO_motif_hits.bed");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   async function downloadFiltered(merge?: boolean) {
     if (!lastFilters)
       return alert("Apply filters at least once before downloading.");
@@ -914,6 +941,16 @@ Enter a name and choose a color for each motif.`}
                         onClick={() => downloadFiltered()}
                       >
                         Download hits (CSV)
+                      </Button>
+                      <Button
+                        variant="outline-info"
+                        size="sm"
+                        disabled={
+                          !dataId || !lastFilters || !filteredHits.length
+                        }
+                        onClick={downloadBED}
+                      >
+                        Download hits (BED)
                       </Button>
                     </MotifOccurencePlot>
                   </>

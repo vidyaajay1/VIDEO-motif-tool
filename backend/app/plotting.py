@@ -231,7 +231,19 @@ def plot_occurrence_overview_plotly(
             denom  = m.max_score if m.max_score else 1.0
             alphas = 0.3 + 0.7 * np.clip(sub["Score_bits"].astype(float).values / denom, 0, 1)
             colors = [_rgba_with_alpha(m.color, a) for a in alphas]
+            # ── NEW: merge Midpoint from peaks_df for JBrowse locus URL ─────────
+            dfp_mid = peaks_df[["Peak_ID", "Midpoint"]].copy()
+            dfp_mid["Peak_ID"] = dfp_mid["Peak_ID"].astype(str)
+            sub = sub.merge(dfp_mid, on="Peak_ID", how="left")
 
+            midpoints  = sub["Midpoint"].astype(float).values
+            locus_starts = (midpoints - window).astype(int)
+            locus_ends   = (midpoints + window).astype(int)
+            jbrowse_urls = np.array([
+                f"https://flybase.org/jbrowse/?data=data/json/dmel&loc={c}:{s}..{e}"
+                for c, s, e in zip(chrom, locus_starts, locus_ends)
+            ])
+            # ─────────────────────────────────────────────────────────────────────
             end_vals = base_vals + x_vals
 
             hovertemplate = (
@@ -241,6 +253,7 @@ def plot_occurrence_overview_plotly(
                 "p-value: %{customdata[9]:.2e}<br>"
                 "Strand: %{customdata[7]}"
                 + ("<br>Seq: %{customdata[8]}" if seq is not None else "")
+                + "<br><a href='%{customdata[10]}' target='_blank'>View in FlyBase JBrowse</a>"  # ← NEW
                 + "<extra></extra>"
             )
 
@@ -251,8 +264,9 @@ def plot_occurrence_overview_plotly(
                 chrom, start_abs, end_abs, strand,
             ]
             if seq is not None:
-                custom_cols.append(seq.values)  # index 8
-            custom_cols.append(pvals)          # index 9 if seq present, else 8
+                custom_cols.append(seq.values)        # index 8
+            custom_cols.append(pvals)                 # index 9
+            custom_cols.append(jbrowse_urls)          # index 10 ← NEW
             custom = np.column_stack(custom_cols)
 
             fig.add_bar(
