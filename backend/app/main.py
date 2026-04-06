@@ -146,14 +146,6 @@ async def get_genomic_input(
         gene_list=gene_list,
         gene_lfc = gene_lfc
     )
-    if not gene_list:
-        # BED mode: assign dummy scores by peak order
-        gene_lfc = {
-            row["Peak_ID"]: float(len(peaks_df) - i)
-            for i, row in peaks_df.reset_index(drop=True).iterrows()
-        }
-        with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
-            pickle.dump(gene_lfc, lf)
 
     if peaks_df.empty:
         raise HTTPException(
