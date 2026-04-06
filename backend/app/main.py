@@ -154,7 +154,7 @@ async def get_genomic_input(
         }
         with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
             pickle.dump(gene_lfc, lf)
-            
+
     if peaks_df.empty:
         raise HTTPException(
         status_code=400,
@@ -174,7 +174,15 @@ async def get_genomic_input(
         with open(os.path.join(TMP_DIR, f"{data_id}_genes.pkl"), "wb") as f:
             pickle.dump(gene_list, f)
         with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
-            pickle.dump(gene_lfc, lf) 
+            pickle.dump(gene_lfc, lf)
+    else:
+        # BED mode: assign dummy scores by peak order so downstream scoring works
+        gene_lfc = {
+            row["Peak_ID"]: float(len(peaks_df) - i)
+            for i, row in peaks_df.reset_index(drop=True).iterrows()
+        }
+        with open(os.path.join(TMP_DIR, f"{data_id}_genes_lfc.pkl"), "wb") as lf:
+            pickle.dump(gene_lfc, lf)
  
     peak_list = list(peaks_df['Peak_ID'])           
     peak_list = sorted(
