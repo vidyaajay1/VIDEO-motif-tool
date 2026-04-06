@@ -19,7 +19,6 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
             chrom = fields[0]
             start = int(fields[1])
             end = int(fields[2])
-            # use name field if present, otherwise generate one
             peak_name = fields[3] if len(fields) >= 4 else f"{chrom}:{start}-{end}"
             midpoint = (start + end) // 2
             bed_dict[peak_name] = {
@@ -27,7 +26,9 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
                 "Start": start,
                 "End": end,
                 "Peak Length": end - start,
-                "Midpoint": midpoint
+                "Midpoint": midpoint,
+                "Strand": "+",       # <-- add this
+                "logFC": 0.0,        # <-- add this
             }
     bed_df = pd.DataFrame.from_dict(bed_dict, orient="index").reset_index()
     bed_df = bed_df.rename(columns={"index": "Peak_ID"})
