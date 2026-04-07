@@ -65,7 +65,8 @@ def scan_single_dataset(data_id: str, window: int, fimo_threshold: float) -> dic
         "fasta/genome.fa",
         window,
         motif_list,
-        fimo_threshold
+        fimo_threshold,
+        job_id=data_id 
     )
 
     _progress(90)
@@ -103,7 +104,8 @@ def scan_session_batch(session_id: str, dataset_ids: list[str], window: int, fim
             "fasta/genome.fa",
             window,
             motif_list,
-            fimo_threshold
+            fimo_threshold,
+            job_id=data_id 
         )
         with open(f"{TMP_DIR}/{data_id}_motif_hits.pkl", "wb") as f:
             pickle.dump(motif_hits, f)
@@ -171,9 +173,8 @@ def filter_score_single_task(data_id: str, have_atac: bool, have_chip: bool, ove
                         [["Peak_ID","Motif","P_regulatory","M_prom","M_chip","M_atac","logFC","FIMO_score"]])
     top_fp = os.path.join(TMP_DIR, f"{data_id}_top_hits.tsv")
     top_hits.to_csv(top_fp, sep="\t", index=False)
-
-
-
+    _progress(100)
+    return {"data_id": data_id, "ok": True}
 
 # ------------------------------
 # 2) FILTER + SCORE (compare/batch)
