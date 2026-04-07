@@ -236,6 +236,11 @@ def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list: List[Motif], fimo
 
     try:
         peaks_df_to_fasta(peaks_df, ref_fasta, fasta_fp, window_size)
+        # DEBUG - remove after fixing
+        with open(fasta_fp) as f:
+            lines = [l.strip() for l in f if l.startswith(">")]
+        print(f"[debug] fasta headers sample: {lines[:3]}")
+        print(f"[debug] fasta path: {fasta_fp}")
         motif_to_memefile(motif_list, motifs_fp)
         fimo_tsv = run_fimo(motifs_fp, fasta_fp, fimo_out, fimo_threshold)
         motif_hits, df_hits = build_motif_hits(fimo_tsv, peaks_df, motif_list)
