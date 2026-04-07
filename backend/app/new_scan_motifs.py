@@ -133,6 +133,9 @@ def run_fimo(
     with tempfile.TemporaryDirectory() as tmpdir:
         fimo_out = output_dir or os.path.join(tmpdir, "fimo_out")
         os.makedirs(fimo_out, exist_ok=True)
+        print(f"[debug] run_fimo sequences_file={sequences_file}")
+        print(f"[debug] run_fimo fimo_out={fimo_out}")
+        print(f"[debug] run_fimo cmd={cmd}")
         cmd = [exe, "--thresh", str(threshold), "--oc", fimo_out, meme_file, sequences_file]
         subprocess.run(cmd, check=True)
         results_tsv = os.path.join(fimo_out, "fimo.tsv")
