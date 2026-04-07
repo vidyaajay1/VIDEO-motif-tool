@@ -151,6 +151,10 @@ def build_motif_hits(
 ) -> Tuple[Dict[str, Dict[str, List[Tuple]]], pd.DataFrame]:
     
     peaks = peaks_df.set_index('Peak_ID')
+    # DEBUG - remove after fixing
+    print(f"[debug] peaks index sample: {list(peaks.index[:3])}")
+    print(f"[debug] fimo df sample sequence_names: {fimo_df['sequence_name'].head(3).tolist() if not fimo_df.empty else 'empty'}")
+
     motif_hits = {m.name:{} for m in motif_list}
     for _, hit in fimo_df.iterrows():
         raw_mid   = hit['motif_id']
