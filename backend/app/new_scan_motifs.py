@@ -211,7 +211,7 @@ def build_motif_hits(
     return motif_hits, hits_df
 
 #wrapper function
-def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list:List[Motif], fimo_threshold) -> Dict[str, Dict[str, List[Tuple]]]:
+'''def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list:List[Motif], fimo_threshold) -> Dict[str, Dict[str, List[Tuple]]]:
     os.makedirs('fimo_files', exist_ok=True)
     fasta_fp = "fimo_files/sequences.txt"
     motifs_fp = "fimo_files/motifs.txt"
@@ -219,4 +219,24 @@ def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list:List[Motif], fimo_
     motif_to_memefile(motif_list, motifs_fp)
     fimo_tsv = run_fimo(motifs_fp, fasta_fp, "fimo_files", fimo_threshold)
     motif_hits, df_hits = build_motif_hits(fimo_tsv, peaks_df, motif_list)
+    return motif_hits, df_hits'''
+
+def scan_wrapper(peaks_df, ref_fasta, window_size, motif_list: List[Motif], fimo_threshold, job_id: str) -> Dict[str, Dict[str, List[Tuple]]]:
+    # Per-job directory to avoid concurrency collisions
+    job_dir = os.path.join(tempfile.gettempdir(), f"fimo_{job_id}")
+    os.makedirs(job_dir, exist_ok=True)
+
+    fasta_fp  = os.path.join(job_dir, "sequences.txt")
+    motifs_fp = os.path.join(job_dir, "motifs.txt")
+    fimo_out  = os.path.join(job_dir, "fimo_out")
+
+    try:
+        peaks_df_to_fasta(peaks_df, ref_fasta, fasta_fp, window_size)
+        motif_to_memefile(motif_list, motifs_fp)
+        fimo_tsv = run_fimo(motifs_fp, fasta_fp, fimo_out, fimo_threshold)
+        motif_hits, df_hits = build_motif_hits(fimo_tsv, peaks_df, motif_list)
+    finally:
+        # Clean up temp dir after scan regardless of success/failure
+        shutil.rmtree(job_dir, ignore_errors=True)
+
     return motif_hits, df_hits
