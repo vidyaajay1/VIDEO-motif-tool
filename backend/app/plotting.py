@@ -16,8 +16,11 @@ class MotifSpec:
     #ADD A P-VAL THRESHOLD?
 def _as_motif_specs(motif_list, df_hits: pd.DataFrame) -> List[MotifSpec]:
     specs: List[MotifSpec] = []
-    by_motif_max = df_hits.groupby("Motif")["Score_bits"].max().to_dict()
-
+    # Guard against empty df_hits
+    if df_hits is None or df_hits.empty or "Motif" not in df_hits.columns:
+        by_motif_max = {}
+    else:
+        by_motif_max = df_hits.groupby("Motif")["Score_bits"].max().to_dict()
     for m in motif_list:
         # Access like object OR dict
         name   = getattr(m, "name", None) or m.get("name")

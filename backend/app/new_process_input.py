@@ -19,10 +19,14 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
             chrom = fields[0]
             start = int(fields[1])
             end = int(fields[2])
+            # ── strip chr prefix early so everything downstream is consistent ──
+            chrom_stripped = chrom[3:] if chrom.startswith("chr") else chrom
+
             peak_name = fields[3] if len(fields) >= 4 else f"{chrom}:{start}-{end}"
             midpoint = (start + end) // 2
             bed_dict[peak_name] = {
-                "Chromosome": chrom,
+                "Chromosome": chrom_stripped,          # no chr prefix
+                "Chromosome_chr": "chr" + chrom_stripped,
                 "Start": start,
                 "End": end,
                 "Peak Length": end - start,
@@ -35,12 +39,6 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
 
     if bed_df.empty:
         return bed_df
-
-    if bed_df["Chromosome"].iloc[0].startswith("chr"):
-        bed_df["Chromosome_chr"] = bed_df["Chromosome"].copy()
-        bed_df["Chromosome"] = bed_df["Chromosome"].str.replace("chr", "", regex=False)
-    else:
-        bed_df["Chromosome_chr"] = "chr" + bed_df["Chromosome"]
 
     valid_chromosomes = ["2L", "2R", "3L", "3R", "4", "X", "Y", "mitochondrion_genome"]
     bed_df = bed_df[bed_df["Chromosome"].isin(valid_chromosomes)].reset_index(drop=True)
