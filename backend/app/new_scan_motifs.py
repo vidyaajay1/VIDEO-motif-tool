@@ -52,8 +52,11 @@ def peaks_df_to_fasta(
             start = max(0, zero_based_mid - half)
             end   = zero_based_mid + half + 1   # so length = 2*half + 1
             seq = genome[chrom][start : end].seq
-            header = f">{peak_id}"
+            # Replace : with _ so FIMO doesn't truncate the sequence name
+            safe_peak_id = peak_id.replace(":", "_")
+            header = f">{safe_peak_id}"
             out.write(header + "\n")
+
             # wrap at 60 chars per line
             for line in textwrap.wrap(seq, 60):
                 out.write(line + "\n")
@@ -163,6 +166,8 @@ def build_motif_hits(
         raw_mid   = hit['motif_id']
         mid = raw_mid.split('-', 1)[1] if '-' in raw_mid else raw_mid
         seqnm = hit['sequence_name']
+        # FIMO may use _ instead of : due to colon truncation fix
+        seqnm_lookup = seqnm.replace("_", ":", 1) 
         start = int(hit['start'])
         stop  = int(hit['stop'])
         strand= hit['strand']
@@ -170,10 +175,11 @@ def build_motif_hits(
         seq = str(hit['matched_sequence'])
         pval = float(hit['p-value'])
 
-        # fetch the matching peak metadata
-        if seqnm not in peaks.index:
-            continue  # Skip hits without matching peak
-        peak = peaks.loc[seqnm]
+         # Skip hits without matching peak
+        if seqnm not in peaks.index and seqnm_lookup not in peaks.index:
+            continue
+        peak = peaks.loc[seqnm_lookup if seqnm_lookup in peaks.index else seqnm]
+        #peak = peaks.loc[seqnm]
         peak_lfc = peak['logFC']
         peak_len = peak['Peak Length']
         chrom     = peak['Chromosome']

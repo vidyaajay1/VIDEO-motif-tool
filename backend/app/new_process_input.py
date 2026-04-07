@@ -22,7 +22,8 @@ def read_gene_bed(bed_filepath: str) -> pd.DataFrame:
             # ── strip chr prefix early so everything downstream is consistent ──
             chrom_stripped = chrom[3:] if chrom.startswith("chr") else chrom
 
-            peak_name = fields[3] if len(fields) >= 4 else f"{chrom}:{start}-{end}"
+            #peak_name = fields[3] if len(fields) >= 4 else f"{chrom}:{start}-{end}"
+            peak_name = fields[3] if len(fields) >= 4 else f"{chrom_stripped}_{start}-{end}"
             midpoint = (start + end) // 2
             bed_dict[peak_name] = {
                 "Chromosome": chrom_stripped,          # no chr prefix
