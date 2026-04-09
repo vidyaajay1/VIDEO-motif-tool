@@ -19,7 +19,8 @@ from app.tasks import (
     plot_filtered_compare_task,
     chip_overlay_single_task,
     chip_overlay_compare_task,
-    run_streme_task)
+    run_streme_task,
+    run_streme_bed_task)
 from app.new_process_input import process_genomic_input, get_motif_list
 from app.process_tomtom import subset_by_genes
 from app.filter_tfs import filter_tfs_from_gene_list
@@ -872,57 +873,67 @@ async def run_streme_endpoint(
     tissue: Optional[str] = Form(None),
     stage: Optional[str] = Form(None),
     gene_file: Optional[UploadFile] = File(None),
+    bed_file: Optional[UploadFile] = File(None),   # <-- add this
 ):
     try:
         genome_path = "fasta/genome.fa"
-
-        # --- Build gene_list in the API process ---
-        if use_de_genes:
-            if not tissue or not stage:
-                raise HTTPException(status_code=400, detail="Missing tissue or stage selection")
-
-            sheet_map = {
-                "10-12": "stage 10-12",
-                "13-16": "stage 13-16",
-            }
-            if stage not in sheet_map:
-                raise HTTPException(status_code=400, detail="Invalid stage")
-
-            sheet_name = sheet_map[stage]
-            if sheet_name not in TF_DATA_CACHE:
-                raise HTTPException(status_code=404, detail="Stage data not loaded")
-
-            df = TF_DATA_CACHE[sheet_name]
-            if "gene" not in df.columns or "cell_types" not in df.columns:
-                raise HTTPException(status_code=500, detail="Required columns missing in DE data")
-
-            gene_list = df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist()
-            if not gene_list:
-                raise HTTPException(status_code=404, detail="No DE genes found for this tissue")
-        else:
-            if gene_file is None:
-                raise HTTPException(status_code=400, detail="Gene list file missing")
-            df = pd.read_csv(gene_file.file)
-            if df.empty or df.shape[1] < 1:
-                raise HTTPException(status_code=400, detail="Uploaded gene file is empty or invalid")
-            gene_list = df.iloc[:, 0].dropna().tolist()
-            if not gene_list:
-                raise HTTPException(status_code=400, detail="No genes found in the uploaded file")
-
-        # --- Enqueue the background job ---
         tmp_id = uuid.uuid4().hex
-        job = q.enqueue(
-            run_streme_task,
-            gene_list,
-            minw,
-            maxw,
-            window_size,
-            tmp_id,
-            genome_path,           # keyword optional; matches the default anyway
-            job_timeout="3600",     # optional per-job override
-        )
 
-        # Return identifiers the client can use to poll & later download
+        # ── BED mode ────────────────────────────────────────────────────────
+        if bed_file is not None:
+            bed_path = os.path.join(TMP_DIR, f"{tmp_id}_streme_input.bed")
+            with open(bed_path, "wb") as f:
+                shutil.copyfileobj(bed_file.file, f)
+
+            job = q.enqueue(
+                run_streme_bed_task,
+                bed_path,
+                minw,
+                maxw,
+                window_size,
+                tmp_id,
+                genome_path,
+                job_timeout="3600",
+            )
+
+        # ── Gene list mode ───────────────────────────────────────────────────
+        else:
+            if use_de_genes:
+                if not tissue or not stage:
+                    raise HTTPException(status_code=400, detail="Missing tissue or stage selection")
+                sheet_map = {"10-12": "stage 10-12", "13-16": "stage 13-16"}
+                if stage not in sheet_map:
+                    raise HTTPException(status_code=400, detail="Invalid stage")
+                sheet_name = sheet_map[stage]
+                if sheet_name not in TF_DATA_CACHE:
+                    raise HTTPException(status_code=404, detail="Stage data not loaded")
+                df = TF_DATA_CACHE[sheet_name]
+                if "gene" not in df.columns or "cell_types" not in df.columns:
+                    raise HTTPException(status_code=500, detail="Required columns missing in DE data")
+                gene_list = df[df["cell_types"] == tissue]["gene"].dropna().head(250).tolist()
+                if not gene_list:
+                    raise HTTPException(status_code=404, detail="No DE genes found for this tissue")
+            else:
+                if gene_file is None:
+                    raise HTTPException(status_code=400, detail="Gene list file missing")
+                df = pd.read_csv(gene_file.file)
+                if df.empty or df.shape[1] < 1:
+                    raise HTTPException(status_code=400, detail="Uploaded gene file is empty or invalid")
+                gene_list = df.iloc[:, 0].dropna().tolist()
+                if not gene_list:
+                    raise HTTPException(status_code=400, detail="No genes found in the uploaded file")
+
+            job = q.enqueue(
+                run_streme_task,
+                gene_list,
+                minw,
+                maxw,
+                window_size,
+                tmp_id,
+                genome_path,
+                job_timeout="3600",
+            )
+
         return {
             "job_id": job.get_id(),
             "tmp_id": tmp_id,

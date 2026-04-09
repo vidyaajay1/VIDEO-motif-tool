@@ -570,3 +570,37 @@ def run_streme_task(
 
     _progress(100)
     return {"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}
+
+def run_streme_bed_task(
+    bed_path: str,
+    minw: int,
+    maxw: int,
+    window_size: int,
+    tmp_id: str,
+    genome_path: str = "fasta/genome.fa",
+) -> dict:
+    _progress(1)
+
+    # 1) Write FASTA from BED
+    from app.run_streme import write_fasta_from_bed
+    fasta_path = write_fasta_from_bed(bed_path, genome_path, window_size)
+    _progress(20)
+
+    # 2) Run STREME
+    streme_out, output_id = run_streme_on_fasta(
+        fasta_path, minw, maxw, TMP_DIR, output_id=tmp_id
+    )
+    _progress(70)
+
+    # 3) Parse results
+    motifs, html_url = parse_streme_results(streme_out, output_id, request=None)
+    _progress(90)
+
+    # 4) Persist
+    outdir = os.path.join(TMP_DIR, f"{output_id}_streme_out")
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, "result.json"), "w") as f:
+        json.dump({"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}, f)
+
+    _progress(100)
+    return {"motifs": motifs, "streme_html_url": html_url, "tmp_id": output_id}

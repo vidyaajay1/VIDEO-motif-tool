@@ -30,10 +30,11 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
   selectedStage,
   selectedTissue,
 }) => {
-  const [inputSource, setInputSource] = useState<"de_genes" | "uploaded">(
-    "de_genes"
-  );
+  const [inputSource, setInputSource] = useState<
+    "de_genes" | "uploaded" | "bed"
+  >("de_genes");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [bedFile, setBedFile] = useState<File | null>(null);
   const [minWidth, setMinWidth] = useState<number>(6);
   const [maxWidth, setMaxWidth] = useState<number>(10);
   const [windowSize, setWindowSize] = useState<number>(500);
@@ -112,16 +113,22 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
     formData.append("minw", String(minWidth));
     formData.append("maxw", String(maxWidth));
     formData.append("window_size", String(windowSize));
-    formData.append(
-      "use_de_genes",
-      inputSource === "de_genes" ? "true" : "false"
-    );
 
-    if (inputSource === "de_genes") {
-      formData.append("tissue", selectedTissue);
-      formData.append("stage", selectedStage);
-    } else if (uploadedFile) {
-      formData.append("gene_file", uploadedFile);
+    if (inputSource === "bed") {
+      // BED mode — backend detects bed_file presence and ignores use_de_genes
+      formData.append("use_de_genes", "false");
+      if (bedFile) formData.append("bed_file", bedFile);
+    } else {
+      formData.append(
+        "use_de_genes",
+        inputSource === "de_genes" ? "true" : "false",
+      );
+      if (inputSource === "de_genes") {
+        formData.append("tissue", selectedTissue);
+        formData.append("stage", selectedStage);
+      } else if (uploadedFile) {
+        formData.append("gene_file", uploadedFile);
+      }
     }
 
     try {
@@ -130,11 +137,10 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
         body: formData,
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); // { job_id, tmp_id, status, poll_url? }
+      const data = await res.json();
       setJobId(data.job_id);
       setTmpId(data.tmp_id ?? null);
       setStatus(data.status ?? "queued");
-      // polling starts via useEffect
     } catch (err) {
       console.error("Error running STREME:", err);
       alert(`Failed to run STREME: ${err}`);
@@ -143,11 +149,13 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
   };
 
   const disabledRun =
-    isRunning || (inputSource === "uploaded" && !uploadedFile);
+    isRunning ||
+    (inputSource === "uploaded" && !uploadedFile) ||
+    (inputSource === "bed" && !bedFile);
 
   return (
     <Card className="p-4 mt-4">
-      <h5>Motif Discovery for Genes</h5>
+      <h5>Motif Discovery for Genes and Enhancers</h5>
       <div>
         <small className="form-text text-muted mt-10 ms-10">
           STREME: Bailey, L. T. <i>Bioinformatics</i> 2021
@@ -169,6 +177,12 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
           checked={inputSource === "uploaded"}
           onChange={() => setInputSource("uploaded")}
         />
+        <Form.Check
+          type="radio"
+          label="Upload a BED file of genomic regions"
+          checked={inputSource === "bed"}
+          onChange={() => setInputSource("bed")}
+        />
       </Form.Group>
 
       {inputSource === "uploaded" && (
@@ -182,6 +196,24 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
               setUploadedFile(input.files?.[0] || null);
             }}
           />
+        </Form.Group>
+      )}
+
+      {inputSource === "bed" && (
+        <Form.Group className="mb-3">
+          <Form.Label>Upload BED file of regions to scan</Form.Label>
+          <Form.Control
+            type="file"
+            accept=".bed"
+            onChange={(e) => {
+              const input = e.target as HTMLInputElement;
+              setBedFile(input.files?.[0] || null);
+            }}
+          />
+          <Form.Text muted>
+            Sequences will be extracted ± window size from each region's
+            midpoint.
+          </Form.Text>
         </Form.Group>
       )}
 
@@ -227,10 +259,10 @@ const StremeDiscoveryCard: React.FC<StremeDiscoveryCardProps> = ({
             {status === "finished"
               ? "Finalizing..."
               : status === "failed"
-              ? "Failed"
-              : status === "started"
-              ? `Running STREME... ${progress || 0}%`
-              : "Queued..."}
+                ? "Failed"
+                : status === "started"
+                  ? `Running STREME... ${progress || 0}%`
+                  : "Queued..."}
           </>
         ) : (
           "Run STREME"

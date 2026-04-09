@@ -60,6 +60,40 @@ def write_fasta_from_genes(gene_list, genome_fasta_path, window_size = 500):
                 continue
     return fasta_path
 
+def write_fasta_from_bed(bed_path: str, genome_fasta_path: str, window_size: int = 500) -> str:
+    genome = Fasta(genome_fasta_path)
+    output_id = str(uuid.uuid4())
+    fasta_path = str(Path(TMP_DIR) / f"{output_id}_bed_peaks.fa")
+
+    with open(bed_path, "r") as bed, open(fasta_path, "w") as out:
+        for line in bed:
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("track") or line.startswith("browser"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 3:
+                continue
+            chrom = fields[0]
+            start = int(fields[1])
+            end = int(fields[2])
+            peak_name = fields[3] if len(fields) >= 4 else f"{chrom}_{start}-{end}"
+
+            # strip chr prefix to match genome FASTA keys
+            chrom_key = chrom[3:] if chrom.startswith("chr") else chrom
+
+            midpoint = (start + end) // 2
+            half = window_size
+            seq_start = max(0, midpoint - half)
+            seq_end = midpoint + half
+
+            try:
+                seq = genome[chrom_key][seq_start:seq_end].seq
+                out.write(f">{peak_name}\n{seq}\n")
+            except Exception:
+                continue
+
+    return fasta_path
+
 def run_streme_on_fasta(input_fasta, minw, maxw, tmp_dir, output_id: str | None = None):
     tmp_dir = TMP_DIR
     streme_bin = resolve_streme_exe()
