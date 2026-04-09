@@ -38,16 +38,16 @@ export default function GetMotifInput({
 }: GetMotifInputProps) {
   const [matrixPaste, setMatrixPaste] = useState("");
   const [showMatrixEditor, setShowMatrixEditor] = useState(true);
-
+  const [parsedFromFile, setParsedFromFile] = useState(
+    () =>
+      (motif.type === "pwm" && motif.pwm.length > 0) ||
+      (motif.type === "pcm" && motif.pcm.length > 0),
+  );
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value as UserMotif["type"];
-    onChange({
-      type: newType,
-      pwm: [],
-      pcm: [],
-      iupac: "",
-    });
+    onChange({ type: newType, pwm: [], pcm: [], iupac: "" });
     setShowMatrixEditor(true);
+    setParsedFromFile(false); // <-- add this
   };
 
   const handleAddRow = () => {
@@ -99,8 +99,6 @@ export default function GetMotifInput({
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-
-      // If it looks like a MEME-format file, use the structured parser
       if (text.includes("letter-probability matrix:")) {
         const parsed = parseMemeMotifs(text, 1);
         if (parsed.length > 0) {
@@ -109,15 +107,15 @@ export default function GetMotifInput({
             pwm: [],
             pcm: [],
             [motif.type]: matrix,
-            // Only pre-fill name if the user hasn't already set one
             ...(motif.name === "" ? { name } : {}),
           } as any);
           setShowMatrixEditor(false);
+          setParsedFromFile(true); // <-- add this
         }
       } else {
-        // Plain matrix text — existing behaviour
         parseMatrixText(text);
         setShowMatrixEditor(false);
+        setParsedFromFile(true); // <-- add this
       }
     };
     reader.readAsText(file);
@@ -151,7 +149,10 @@ export default function GetMotifInput({
                     <Button
                       variant="outline-secondary"
                       size="sm"
-                      onClick={() => setShowMatrixEditor(true)}
+                      onClick={() => {
+                        setShowMatrixEditor(true);
+                        setParsedFromFile(false); // <-- add this
+                      }}
                     >
                       Edit Matrix
                     </Button>
@@ -211,31 +212,46 @@ export default function GetMotifInput({
                   </InputGroup>
                 ))}
 
-                <Form.Control
-                  as="textarea"
-                  rows={5}
-                  placeholder="Paste motif matrix here (vertical ACGT), no header"
-                  value={matrixPaste}
-                  onChange={(e) => setMatrixPaste(e.target.value)}
-                  className="mb-2"
-                />
-                <Button
-                  size="sm"
-                  variant="outline-primary"
-                  onClick={handlePasteSubmit}
-                  className="me-2"
-                >
-                  Parse Pasted Matrix
-                </Button>
+                {/* Only show paste area if user hasn't already uploaded a file */}
+                {!parsedFromFile && (
+                  <>
+                    <Form.Control
+                      as="textarea"
+                      rows={5}
+                      placeholder="Paste motif matrix here (vertical ACGT), no header"
+                      value={matrixPaste}
+                      onChange={(e) => setMatrixPaste(e.target.value)}
+                      className="mb-2"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline-primary"
+                      onClick={handlePasteSubmit}
+                      className="me-2"
+                    >
+                      Parse Pasted Matrix
+                    </Button>
+                  </>
+                )}
 
                 <Form.Group controlId="formFile" className="mt-2">
-                  <Form.Label>Or upload motif file</Form.Label>
+                  <Form.Label>
+                    {parsedFromFile
+                      ? "Re-upload motif file"
+                      : "Or upload motif file"}
+                  </Form.Label>
                   <Form.Control
                     type="file"
-                    accept=".txt"
+                    accept=".txt,.meme"
                     onChange={handleFileUpload}
                     size="sm"
                   />
+                  {parsedFromFile && (
+                    <Form.Text muted>
+                      Matrix parsed from file. Use "Edit Matrix" to make manual
+                      changes, or re-upload a different file.
+                    </Form.Text>
+                  )}
                 </Form.Group>
 
                 <Button
