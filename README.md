@@ -2,8 +2,7 @@
 
 ## Access the web-app here:  [VIDEO-motif-tool](http://ec2-3-150-143-155.us-east-2.compute.amazonaws.com)  
 
-VIDEO is a user-friendly tool for visualizing Drosophila transcription factor binding motifs in promoter proximal regions of genes. More details, applications 
-and case studies using VIDEO can be found in the preprint: 
+VIDEO is a user-friendly tool for visualizing Drosophila transcription factor binding motifs in promoter proximal and distal enhancer regions of genes. More details, applications and case studies using VIDEO can be found in the preprint: 
 
 Ajay, V., Laughner, N., Cahan, P., and Andrew, D. J. (2025). VIDEO - Visual Integration of Drosophila Enhancer
 Organization: A tool for integrating and visualizing chromatin accessibility, in vivo transcription factor binding and motif
