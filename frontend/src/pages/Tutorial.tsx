@@ -124,17 +124,30 @@ const Tutorial: React.FC = () => {
             title: "Provide Motif Input",
             text: (
               <>
-                Add motifs as <strong>IUPAC</strong> or matrices{" "}
-                <strong>(PWM/PFM/PCM)</strong> by pasting or uploading a .txt.
-                If you're pasting a matrix, make sure to click{" "}
-                <em>Parse Pasted Matrix</em> once you paste each matrix. Give
-                each motif a name and color, then click <em>Process Motifs</em>{" "}
-                once all your motifs are entered.
+                <strong>Bulk upload (recommended):</strong> Import up to{" "}
+                <strong>10 motifs at once</strong> by uploading a STREME or
+                MEME-format <code>.txt</code> file using the{" "}
+                <em>Import from STREME / MEME file</em> button at the top of the
+                motif input panel. Each motif in the file will be parsed and
+                added as a separate entry automatically. A{" "}
+                <Badge bg="warning" text="dark">
+                  Maximum of 10 motifs reached
+                </Badge>{" "}
+                warning will appear if your file exceeds the limit.
+                <br />
+                <br />
+                <strong>Manual entry:</strong> Add motifs individually as{" "}
+                <strong>IUPAC</strong> strings or matrices{" "}
+                <strong>(PWM/PFM/PCM)</strong> by pasting into the text area. If
+                you're pasting a matrix, click <em>Parse Pasted Matrix</em>{" "}
+                after each paste. Give each motif a name and color using the
+                palette icon, then click <em>Process Motifs</em> once all your
+                motifs are entered.
               </>
             ),
             imgs: [
-              "/images/tutorial/fig-3b_motif_input.png",
-              "/images/tutorial/fig-3c_motif_input_example.png",
+              "/images/tutorial/fig-3b_motif_bulk_upload.png",
+              "/images/tutorial/fig-3b_motif_color_picker.png",
             ],
           },
           {
@@ -155,7 +168,7 @@ const Tutorial: React.FC = () => {
                 Upload <strong>BED</strong> peak files for chromatin
                 accessibility and/or TF binding. Click{" "}
                 <em>Filter Motif Hits</em> to enable downstream toggles for
-                “open chromatin only” and “ChIP peak only.”
+                "open chromatin only" and "ChIP peak only."
               </>
             ),
             img: "/images/tutorial/fig-3d_atac_chip.png",
@@ -283,7 +296,7 @@ const Tutorial: React.FC = () => {
         ],
       },
     ],
-    []
+    [],
   );
 
   return (
