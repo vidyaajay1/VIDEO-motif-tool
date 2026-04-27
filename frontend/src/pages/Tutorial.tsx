@@ -124,16 +124,22 @@ const Tutorial: React.FC = () => {
             title: "Provide Motif Input",
             text: (
               <>
-                <strong>Bulk upload (recommended):</strong> Import up to{" "}
-                <strong>10 motifs at once</strong> by uploading a STREME or
-                MEME-format <code>.txt</code> file using the{" "}
+                <strong>
+                  Bulk upload (outputs of STREME/MEME/downloaded from TF Finder
+                  page):
+                </strong>{" "}
+                Import up to <strong>10 motifs at once</strong> by uploading a
+                STREME or MEME-format <code>.txt</code> file using the{" "}
                 <em>Import from STREME / MEME file</em> button at the top of the
                 motif input panel. Each motif in the file will be parsed and
                 added as a separate entry automatically. A{" "}
                 <Badge bg="warning" text="dark">
                   Maximum of 10 motifs reached
                 </Badge>{" "}
-                warning will appear if your file exceeds the limit.
+                warning will appear if your file has more than 10 motifs. In
+                that case, you can either (1) edit the file to include only your
+                top motifs or (2) paste motifs individually using the manual
+                entry method described below.
                 <br />
                 <br />
                 <strong>Manual entry:</strong> Add motifs individually as{" "}
@@ -143,11 +149,21 @@ const Tutorial: React.FC = () => {
                 after each paste. Give each motif a name and color using the
                 palette icon, then click <em>Process Motifs</em> once all your
                 motifs are entered.
+                <strong>Note on Parsing Motifs:</strong> If the entries in your
+                PWM are already in the tiny matrix boxes with one number in each
+                box, it means that your motif is parsed. Bulk uploads are
+                automatically parse and you will only have to enter a name and
+                pick a color. If you are pasting a individual matrix, you will
+                have to click the "Parse Pasted Matrix" button to get the
+                entries into the tiny boxes. If your motif is not parsed, it
+                will not be recognized as a valid motif and you will get an
+                error when you click "Process Motifs".
               </>
             ),
             imgs: [
               "/images/tutorial/fig-3b_motif_bulk_upload.png",
               "/images/tutorial/fig-3b_motif_color_picker.png",
+              "/images/tutorial/fig-3b_motif_input.png",
             ],
           },
           {
